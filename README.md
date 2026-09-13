@@ -78,6 +78,8 @@ Requirements: **Python 3.8+** and a modern browser. No pip install, no dependenc
 | `parents.*.display_name` | Shown in the script font at the top, in that parent's colour |
 | `parents.*.password` | Plain password. `password_hash` (SHA-256) is preferred |
 | `parents.*.color` | Pink for mum, blue for dad by default |
+| `backup_dir` | Where `backup_calendar.sh` writes snapshots |
+| `backup_keep` | How many snapshots to retain (oldest pruned beyond this) |
 
 `display_order` flips the header, the ☀/🌙 tick rows, the padlocks, the statistics columns and the
 balance bar. The underlying roles stay `mum` and `dad`; only the display changes.
@@ -250,10 +252,16 @@ popup.
 ```bash
 chmod +x backup_calendar.sh
 crontab -e
-0 * * * * /path/to/custody-calendar/backup_calendar.sh >> /tmp/custody_backup.log 2>&1
+0 * * * * /path/to/custody-calendar/backup_calendar.sh >> /path/to/custody-calendar/backup_calendar.log 2>&1
 ```
 
-Writes a timestamped copy to `backup_dir` only when `data.json` actually changed.
+Every hour it writes a timestamped copy of `data.json` to
+`<backup_dir>/<year>/<month>/<timestamp>.json`, but **only when the file actually changed**, so a
+quiet week costs nothing. It refuses to archive a `data.json` that does not parse as JSON, so a
+corrupt file can never become your newest "good" snapshot, and it never overwrites an existing
+snapshot. `backup_keep` (default 1000) caps how many are retained; the oldest are pruned beyond that.
+
+Restoring is a copy: stop the server, `cp` the snapshot over `data.json`, start it again.
 
 ## Run it as a service
 

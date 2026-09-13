@@ -21,5 +21,6 @@
   "display_order": [
     "mum",
     "dad"
-  ]
+  ],
+  "backup_keep": 1000
 }
