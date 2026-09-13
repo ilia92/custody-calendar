@@ -119,10 +119,16 @@ button { font-family: inherit; }
 .cal-day.conflict { box-shadow: 0 0 0 2px var(--conflict); }
 .cal-day.locked { border-style: double; border-width: 3px; }
 .cal-day.locked .slot { filter: saturate(.72); }
-.cal-day-head .lk { display: inline-flex; align-items: center; }
+.cal-day-head .lk { display: inline-flex; align-items: center; color: #cbd0d6;
+  border-radius: 4px; padding: 1px; }
 .cal-day-head .lk svg { width: 1.05em; height: 1.05em; }   /* padlock follows the badge size */
-.cal-day-head .lk.mum { color: var(--mum-line); }
-.cal-day-head .lk.dad { color: var(--dad-line); }
+.cal-day-head .lk.on.mum { color: var(--mum-line); }
+.cal-day-head .lk.on.dad { color: var(--dad-line); }
+.cal-day-head .lk.mine { cursor: pointer; }
+.cal-day-head .lk.mine:hover { background: #eef0f3; }
+.cal-day-head .lk.mine:hover.mum { color: var(--mum-line); }
+.cal-day-head .lk.mine:hover.dad { color: var(--dad-line); }
+.cal-day-head .lk.theirs { cursor: default; }
 svg.pad { display: block; }
 .locked-note { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; padding: 9px 12px;
   border-radius: 12px; background: #fef3c7; color: #92400e; font-size: 13px; }
@@ -615,9 +621,16 @@ function renderCalendar() {
     if (rec.off.mum && rec.off.dad) badges.push("⚠");
     if ((rec.note || "").trim()) badges.push("📝");
     // one padlock per parent who locked it, in that parent's colour
-    const locks = ROLES.filter((r) => rec.lock[r])
-      .map((r) => '<span class="lk ' + r + '" title="locked by ' + nameOf(r) + '">'
-        + padlock(true, 11) + "</span>").join("");
+    // both padlocks are always shown: grey when open, in that parent's colour when locked
+    const locks = ORDER.map((r) => {
+      const on = rec.lock[r];
+      const mine = r === S.me.role;
+      const tip = on
+        ? nameOf(r) + " locked this day" + (mine ? " — click to unlock" : " (only they can unlock)")
+        : nameOf(r) + " has not locked this day" + (mine ? " — click to lock" : "");
+      return '<span class="lk ' + r + (on ? " on" : "") + (mine ? " mine" : " theirs")
+        + '" data-lock="' + r + '" title="' + tip + '">' + padlock(on, 11) + "</span>";
+    }).join("");
 
     const hd = document.createElement("div");
     hd.className = "cal-day-head";
@@ -905,6 +918,8 @@ $("cal-grid").addEventListener("click", (ev) => {
   const cell = ev.target.closest(".cal-day");
   if (!cell) return;
   const key = cell.dataset.date;
+  const lk = ev.target.closest(".lk");
+  if (lk) { ev.stopPropagation(); toggleLockOn(key, lk.dataset.lock); return; }
   const slot = ev.target.closest(".slot");
   if (slot) {
     const rec = dayOf(key);
@@ -939,22 +954,23 @@ $("q-theirs").onclick = () => { const t = other(S.me.role); setPicks(t, t); save
 $("q-both").onclick = () => { setPicks("both", "both"); saveFromModal(); };
 $("q-clear").onclick = () => { setPicks("none", "none"); saveFromModal(); };
 
-async function toggleLock(role) {
-  const rec = dayOf(openDate);
+async function toggleLockOn(isoStr, role) {
+  const rec = dayOf(isoStr);
   if (role !== S.me.role) {
     flash("only " + nameOf(role) + " can change that padlock", "bad");
     return;
   }
   flash("saving…");
   try {
-    const res = await api("/api/lock", { date: openDate, locked: !rec.lock[role] });
+    const res = await api("/api/lock", { date: isoStr, locked: !rec.lock[role] });
     S.rev = res.rev;
-    if (res.day && !isBlankDay(res.day)) S.days[openDate] = res.day; else delete S.days[openDate];
-    flash(res.day.lock[role] ? "day locked" : "day unlocked", "ok");
-    render(); fillModal();
+    if (res.day && !isBlankDay(res.day)) S.days[isoStr] = res.day; else delete S.days[isoStr];
+    flash(res.day.lock[role] ? "🔒 " + isoStr.slice(5) + " locked" : "🔓 " + isoStr.slice(5) + " unlocked", "ok");
+    render();
+    if (openDate === isoStr) fillModal();
   } catch (e) { flash(e.message, "bad"); }
 }
-ROLES.forEach((r) => { $("lock-" + r).onclick = () => toggleLock(r); });
+ROLES.forEach((r) => { $("lock-" + r).onclick = () => toggleLockOn(openDate, r); });
 $("m-close").onclick = closeModal;
 $("modal-backdrop").addEventListener("click", (ev) => { if (ev.target === $("modal-backdrop")) closeModal(); });
 document.addEventListener("keydown", (ev) => {

@@ -140,7 +140,8 @@ exactly that day.
 | Red ring + ⚠ | **Neither** of you can — needs solving |
 | Red date number | Saturday, Sunday — or a holiday, which also tints the cell |
 | Red cell + 🎉 | Holiday, a day off |
-| Pink / blue padlock | Locked by that parent — the whole day is frozen |
+| Grey open padlocks | Nobody has locked that day |
+| Pink / blue padlock | Locked by that parent — the whole day is frozen. Click your own to toggle |
 | Indigo ring | Today |
 
 ### Who may change what
@@ -162,8 +163,12 @@ change — not the day, not the night, not a NO-day, not the note — for *eithe
 person who locked it.
 
 Only the parent who set a padlock can remove it. You can always add your own on top, and then the
-day stays frozen until both are removed. The popup shows both padlocks side by side, pink and blue,
-so you can see who has locked; "Apply to a date range" skips locked days and says which.
+day stays frozen until both are removed. "Apply to a date range" skips locked days and says which.
+
+**Both padlocks are always visible**, in the top ribbon of every day and side by side in the day
+popup: grey and open when nobody has locked, filled in that parent's colour once they do. Yours is
+clickable — click it straight in the calendar to lock or unlock that day without opening anything.
+Clicking the other parent's padlock only tells you it is theirs to change.
 
 ### Statistics
 
