@@ -1,0 +1,1095 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Custody Calendar</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+@font-face {
+  font-family: 'Wedding'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('fonts/GreatVibes-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+2122;
+}
+@font-face {
+  font-family: 'Wedding'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('fonts/GreatVibes-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+:root {
+  --bg: #f3f4f6;
+  --panel: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;
+  --line: #d1d5db;
+  --radius: 18px;
+  --shadow: 0 6px 18px rgba(0,0,0,.06);
+  --mum: #ec4899;  --mum-soft: #fbcfe8;  --mum-line: #db2777;
+  --dad: #3b82f6;  --dad-soft: #bfdbfe;  --dad-line: #2563eb;
+  --off: #9ca3af;
+  --holiday: #dc2626;
+  --conflict: #ef4444;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font-family: Inter, Arial, sans-serif; font-size: 14px; }
+button { font-family: inherit; }
+.container { max-width: 1500px; margin: 0 auto; padding: 16px; }
+
+/* ---------- topbar ---------- */
+.topbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 12px 20px; margin-bottom: 16px; }
+.brand { font-size: 17px; font-weight: 700; margin-right: 2px; }
+.names { font-family: 'Wedding', 'Segoe Script', 'Brush Script MT', cursive;
+  font-size: 34px; line-height: 1.05; display: flex; align-items: baseline; gap: 10px; }
+.names .n-mum { color: var(--mum); }
+.names .n-dad { color: var(--dad); }
+.names .amp { color: var(--muted); font-size: 26px; }
+.spacer { flex: 1 1 auto; }
+.whoami { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; color: #fff; }
+.chip.mum { background: var(--mum); } .chip.dad { background: var(--dad); }
+.ghost { border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  border-radius: 10px; padding: 6px 11px; font-size: 13px; cursor: pointer; }
+.ghost:hover { border-color: var(--muted); }
+#save-dot { font-size: 12px; color: var(--muted); min-width: 76px; text-align: right; }
+#save-dot.ok { color: #059669; } #save-dot.bad { color: var(--conflict); }
+
+/* ---------- layout ---------- */
+.main { display: grid; grid-template-columns: minmax(0,1fr) 340px; gap: 16px; align-items: start; }
+@media (max-width: 1080px) { .main { grid-template-columns: 1fr; } }
+
+.panel { background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 16px 18px; }
+.panel h2 { margin: 0 0 12px; font-size: 17px; }
+
+/* ---------- calendar ---------- */
+.cal-nav { display: flex; align-items: center; gap: 8px; }
+.cal-nav-btn { border: 1px solid var(--line); background: var(--panel); border-radius: 10px;
+  width: 32px; height: 30px; font-size: 16px; cursor: pointer; color: var(--text); }
+.cal-nav-btn:hover { border-color: var(--muted); }
+.cal-month-label { font-size: 19px; font-weight: 700; min-width: 210px; }
+/* --cs is the calendar scale: raise or lower this one number to resize the whole grid */
+#cal-panel { --cs: 1.4; }
+.cal-grid { display: grid; grid-template-columns: calc(26px * var(--cs)) repeat(7, minmax(0,1fr));
+  gap: calc(5px * var(--cs)); margin-top: 14px; }
+.cal-dow { text-align: center; font-size: calc(11px * var(--cs)); font-weight: 700;
+  color: var(--muted); padding-bottom: 2px; }
+.cal-dow.we { color: var(--holiday); }
+.cal-cw { font-size: calc(10px * var(--cs)); color: #9ca3af; display: flex;
+  align-items: center; justify-content: center; }
+.cal-day { position: relative; border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  background: var(--panel); display: grid; grid-template-rows: auto 1fr 1fr;
+  min-height: calc(82px * var(--cs)); cursor: pointer; }
+.cal-day:hover { border-color: #9ca3af; }
+.cal-day.other-month { opacity: .42; }
+.cal-day.today { box-shadow: 0 0 0 2px #6366f1; }
+.cal-day.has-off { background: #eef0f3; }
+.cal-day-head { display: flex; align-items: center; gap: 3px; padding: 4px 7px 3px;
+  font-size: calc(12px * var(--cs)); font-weight: 700; }
+.cal-day-head .num { margin-right: auto; }
+.cal-day.we .num { color: var(--holiday); }
+.cal-day.hol { border-color: #fca5a5; }
+.cal-day.hol .cal-day-head { background: #fee2e2; }
+.cal-day.hol .num { color: var(--holiday); font-weight: 800; }
+.sw.hol { background: #fee2e2; border-color: #fca5a5; }
+.cal-day-head .badges { display: flex; align-items: center; gap: 3px;
+  font-size: calc(10px * var(--cs)); font-weight: 400; }
+.slot { display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: calc(10.5px * var(--cs)); color: #4b5563; border-top: 1px dashed var(--line);
+  padding: 2px 0; position: relative; z-index: 1; }
+.slot .who { font-weight: 700; letter-spacing: .2px; }
+.slot.none { background: repeating-linear-gradient(45deg, #fff 0 6px, #f6f7f9 6px 12px);
+  color: #b0b5bd; }
+.slot.mum { background: var(--mum-soft); color: #831843; }
+.slot.dad { background: var(--dad-soft); color: #1e3a8a; }
+.slot.both { background: linear-gradient(100deg, var(--mum-soft) 0 50%, var(--dad-soft) 50% 100%);
+  color: #374151; }
+.slot.suggest { box-shadow: inset 0 0 0 2px rgba(99,102,241,.45); }
+.cal-day.off-mum::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+  width: calc(7px * var(--cs));
+  z-index: 2; background: repeating-linear-gradient(45deg, var(--mum) 0 3px, var(--off) 3px 6px); }
+.cal-day.off-dad::after { content: ""; position: absolute; right: 0; top: 0; bottom: 0;
+  width: calc(7px * var(--cs));
+  z-index: 2; background: repeating-linear-gradient(45deg, var(--dad) 0 3px, var(--off) 3px 6px); }
+.cal-day.conflict { box-shadow: 0 0 0 2px var(--conflict); }
+.cal-day.locked { border-style: double; border-width: 3px; }
+.cal-day.locked .slot { filter: saturate(.72); }
+.cal-day-head .lk { display: inline-flex; align-items: center; }
+.cal-day-head .lk svg { width: 1.05em; height: 1.05em; }   /* padlock follows the badge size */
+.cal-day-head .lk.mum { color: var(--mum-line); }
+.cal-day-head .lk.dad { color: var(--dad-line); }
+svg.pad { display: block; }
+.locked-note { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; padding: 9px 12px;
+  border-radius: 12px; background: #fef3c7; color: #92400e; font-size: 13px; }
+.locked-note.hide { display: none; }
+.lock-row { display: flex; gap: 8px; margin-top: 14px; border-top: 1px solid var(--line);
+  padding-top: 12px; }
+.lockchip { flex: 1 1 0; display: flex; align-items: center; justify-content: center; gap: 7px;
+  border: 1.5px solid var(--line); border-radius: 999px; padding: 9px 10px; background: #fff;
+  font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.lockchip .ic { display: inline-flex; align-items: center; opacity: .45; }
+.lockchip.mum .ic { color: var(--mum-line); }
+.lockchip.dad .ic { color: var(--dad-line); }
+.lockchip.mum.on { background: var(--mum-soft); border-color: var(--mum); color: #831843; }
+.lockchip.dad.on { background: var(--dad-soft); border-color: var(--dad); color: #1e3a8a; }
+.lockchip.on .ic { opacity: 1; }
+.lockchip.theirs { cursor: not-allowed; }
+.lockchip.mine { box-shadow: inset 0 0 0 1px rgba(0,0,0,.04); }
+.lockchip .sub { font-size: 10px; font-weight: 400; opacity: .75; }
+
+/* ---------- display order (config: display_order) ---------- */
+:root[data-first="dad"] .names .n-dad,
+:root[data-first="dad"] .picks .pick.dad,
+:root[data-first="dad"] .lock-row .lockchip.dad,
+:root[data-first="dad"] .lg-parents .lg-dad { order: 1; }
+:root[data-first="dad"] .names .amp { order: 2; }
+:root[data-first="dad"] .names .n-mum,
+:root[data-first="dad"] .picks .pick.mum,
+:root[data-first="dad"] .lock-row .lockchip.mum,
+:root[data-first="dad"] .lg-parents .lg-mum { order: 3; }
+.lg-parents { display: inline-flex; gap: 14px; }
+
+/* ---------- legend ---------- */
+.legend { display: flex; flex-wrap: wrap; gap: 7px 16px; margin-top: 16px;
+  font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.sw { width: 15px; height: 11px; border-radius: 3px; border: 1px solid var(--line); display: inline-block; }
+.sw.mum { background: var(--mum-soft); } .sw.dad { background: var(--dad-soft); }
+.sw.both { background: linear-gradient(100deg, var(--mum-soft) 0 50%, var(--dad-soft) 50% 100%); }
+.sw.none { background: repeating-linear-gradient(45deg, #fff 0 4px, #f0f1f3 4px 8px); }
+.sw.offm { background: repeating-linear-gradient(45deg, var(--mum) 0 3px, var(--off) 3px 6px); }
+.sw.offd { background: repeating-linear-gradient(45deg, var(--dad) 0 3px, var(--off) 3px 6px); }
+
+/* ---------- statistics ---------- */
+.scope { display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+.scope button { flex: 1 1 auto; border: 1px solid var(--line); background: var(--panel);
+  border-radius: 9px; padding: 5px 4px; font-size: 12px; cursor: pointer; color: var(--muted); }
+.scope button.on { background: var(--text); border-color: var(--text); color: #fff; font-weight: 600; }
+.custom-range { display: none; gap: 6px; margin-bottom: 12px; }
+.custom-range.on { display: flex; }
+.custom-range input { flex: 1 1 0; min-width: 0; padding: 5px 6px; border: 1px solid var(--line);
+  border-radius: 8px; font-family: inherit; font-size: 12px; }
+.stat-head { display: grid; grid-template-columns: 1fr 62px 62px; font-size: 12px;
+  color: var(--muted); font-weight: 700; padding: 0 2px 4px; }
+.stat-head .mum-h { color: var(--mum); text-align: right; }
+.stat-head .dad-h { color: var(--dad); text-align: right; }
+.stat-head span { min-width: 0; }
+.stat-row { display: grid; grid-template-columns: 1fr 62px 62px; padding: 6px 2px;
+  border-top: 1px solid #f0f1f3; font-size: 15px; align-items: baseline; }
+.stat-row b { text-align: right; font-variant-numeric: tabular-nums; }
+.stat-row.total { font-weight: 700; border-top: 1px solid var(--line); }
+.stat-row .lbl { color: #374151; }
+.stat-row .sub { font-size: 12px; color: var(--muted); }
+.bar { display: flex; height: 16px; border-radius: 999px; overflow: hidden; margin: 14px 0 6px;
+  background: #e5e7eb; }
+.bar i { display: block; height: 100%; }
+.bar .b-mum { background: var(--mum); } .bar .b-dad { background: var(--dad); }
+.bar-legend { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.notes-list { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px;
+  font-size: 12px; max-height: 210px; overflow: auto; }
+.notes-list .ni { display: flex; gap: 7px; padding: 3px 0; color: #374151; }
+.notes-list .ni em { color: var(--muted); font-style: normal; white-space: nowrap; }
+
+/* ---------- modal ---------- */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.30); display: none;
+  z-index: 100; align-items: flex-start; justify-content: center; padding: 5vh 14px; overflow: auto; }
+.modal-backdrop.open { display: flex; }
+.modal { background: var(--panel); border-radius: var(--radius); box-shadow: 0 18px 50px rgba(0,0,0,.25);
+  width: 100%; max-width: 430px; padding: 20px 22px; }
+.modal h3 { margin: 0 0 2px; font-size: 17px; }
+.modal .m-sub { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+.modal .m-sub .hol { color: var(--holiday); font-weight: 600; }
+.slot-edit { border: 1px solid var(--line); border-radius: 12px; padding: 9px 12px; margin-bottom: 9px; }
+.slot-edit > .t { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 7px; }
+.picks { display: flex; gap: 8px; }
+.pick { flex: 1 1 0; display: flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px 4px; cursor: pointer;
+  font-size: 13px; font-weight: 600; user-select: none; background: #fff; }
+.pick input { margin: 0; }
+.pick.mum.on { background: var(--mum-soft); border-color: var(--mum); color: #831843; }
+.pick.dad.on { background: var(--dad-soft); border-color: var(--dad); color: #1e3a8a; }
+.off-box { display: flex; flex-direction: column; gap: 7px; border: 1px solid var(--line);
+  border-radius: 12px; padding: 10px 12px; margin-bottom: 9px; }
+.off-box label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.off-box label.ro { color: var(--muted); }
+.off-box .hint { font-size: 11px; color: var(--muted); }
+.modal textarea { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px;
+  font-family: inherit; font-size: 13px; resize: vertical; min-height: 48px; }
+.quick { display: flex; gap: 6px; margin: 10px 0 4px; }
+.quick button { flex: 1 1 0; border: 1px solid var(--line); background: #fff; border-radius: 9px;
+  padding: 6px 2px; font-size: 12px; cursor: pointer; }
+.quick button:hover { border-color: var(--muted); }
+details.range { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+details.range summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.range-body { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.range-body .row { display: flex; gap: 8px; align-items: center; }
+.range-body input[type=date] { flex: 1 1 0; min-width: 0; padding: 6px; border: 1px solid var(--line);
+  border-radius: 8px; font-family: inherit; font-size: 12px; }
+.dows { display: flex; gap: 4px; }
+.dows label { flex: 1 1 0; text-align: center; font-size: 11px; border: 1px solid var(--line);
+  border-radius: 7px; padding: 4px 0; cursor: pointer; }
+.dows label.on { background: var(--text); color: #fff; border-color: var(--text); }
+.dows input { display: none; }
+.modal-actions { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+.modal-actions .spacer { flex: 1 1 auto; }
+.btn { border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 8px 14px;
+  font-size: 13px; cursor: pointer; }
+.btn.primary { background: var(--text); border-color: var(--text); color: #fff; font-weight: 600; }
+.btn.lock.on { background: #fef3c7; border-color: #f59e0b; }
+.m-log { margin-top: 12px; font-size: 11px; color: var(--muted); line-height: 1.5; }
+.m-warn { margin-top: 10px; padding: 8px 10px; border-radius: 9px; background: #fef3c7;
+  color: #92400e; font-size: 12px; }
+.m-warn.hide { display: none; }
+.m-ok { margin-top: 10px; padding: 8px 10px; border-radius: 9px; background: #d1fae5;
+  color: #065f46; font-size: 12px; }
+.m-ok.hide { display: none; }
+.field { margin-bottom: 10px; }
+.field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.field input { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px;
+  font-family: inherit; font-size: 13px; }
+.field input:focus { outline: 2px solid #c7d2fe; border-color: #a5b4fc; }
+.field .note { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.acct-preview { font-family: 'Wedding', 'Segoe Script', 'Brush Script MT', cursive;
+  font-size: 30px; text-align: center; padding: 4px 0 10px; }
+.fieldset-t { font-size: 12px; font-weight: 700; color: var(--muted); margin: 16px 0 8px;
+  border-top: 1px solid var(--line); padding-top: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="topbar">
+    <span class="brand" id="brand">Custody Calendar</span>
+    <span class="names"><span class="n-mum" id="name-mum"></span><span class="amp">&amp;</span><span class="n-dad" id="name-dad"></span></span>
+    <span class="spacer"></span>
+    <span class="whoami">signed in as <span class="chip" id="me-chip"></span></span>
+    <span id="save-dot"></span>
+    <button class="ghost" id="btn-account" title="Change your name and password">&#9881; my account</button>
+    <button class="ghost" id="btn-refresh-hol" title="Re-fetch the official holiday list">&#127881; holidays</button>
+    <a class="ghost" href="/logout" style="text-decoration:none">sign out</a>
+  </div>
+
+  <div class="main">
+    <section class="panel" id="cal-panel">
+      <div class="cal-nav">
+        <button class="cal-nav-btn" id="cal-prev" title="Previous month">&lsaquo;</button>
+        <span class="cal-month-label" id="cal-month-label"></span>
+        <button class="cal-nav-btn" id="cal-next" title="Next month">&rsaquo;</button>
+        <button class="ghost" id="cal-today">Today</button>
+        <span class="spacer"></span>
+        <span style="font-size:11px;color:var(--muted)">click a &#9728;/&#127769; strip to cycle owner &middot; click the date for details</span>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+      <div class="legend">
+        <span class="lg-parents"><span class="lg-mum"><i class="sw mum"></i> <b id="lg-n-mum">mum</b></span><span class="lg-dad"><i class="sw dad"></i> <b id="lg-n-dad">dad</b></span></span>
+        <span><i class="sw both"></i> both (counts for each)</span>
+        <span><i class="sw none"></i> not decided</span>
+        <span><i class="sw offm"></i> mum can't</span>
+        <span><i class="sw offd"></i> dad can't</span>
+        <span>&#9728; day &middot; &#127769; night (evening &rarr; next morning)</span>
+        <span id="lg-lock"></span>
+        <span>&#9888; both unavailable</span>
+        <span><i class="sw hol"></i> &#127881; holiday / day off</span>
+      </div>
+    </section>
+
+    <section class="panel" id="stats-panel">
+      <h2>Statistics</h2>
+      <div class="scope" id="scope">
+        <button data-scope="month" class="on">Month</button>
+        <button data-scope="year">Year</button>
+        <button data-scope="all">All time</button>
+        <button data-scope="custom">Custom</button>
+      </div>
+      <div class="custom-range" id="custom-range">
+        <input type="date" id="range-from"><input type="date" id="range-to">
+      </div>
+      <div id="stats-body"></div>
+    </section>
+  </div>
+</div>
+
+<!-- ---------------- day modal ---------------- -->
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal" role="dialog" aria-modal="true">
+    <h3 id="m-title"></h3>
+    <div class="m-sub" id="m-sub"></div>
+    <div class="locked-note hide" id="m-locked"></div>
+
+    <div class="slot-edit">
+      <div class="t">&#9728; DAY &mdash; who has the kids during the day</div>
+      <div class="picks">
+        <label class="pick mum" data-g="day" data-r="mum"><input type="checkbox"><span></span></label>
+        <label class="pick dad" data-g="day" data-r="dad"><input type="checkbox"><span></span></label>
+      </div>
+    </div>
+    <div class="slot-edit">
+      <div class="t">&#127769; NIGHT &mdash; this evening until next morning</div>
+      <div class="picks">
+        <label class="pick mum" data-g="night" data-r="mum"><input type="checkbox"><span></span></label>
+        <label class="pick dad" data-g="night" data-r="dad"><input type="checkbox"><span></span></label>
+      </div>
+    </div>
+
+    <div class="off-box">
+      <label id="off-mine"><input type="checkbox" id="off-mine-cb"><span></span></label>
+      <label class="ro" id="off-theirs"><input type="checkbox" id="off-theirs-cb" disabled><span></span></label>
+      <div class="hint">Only you can set your own unavailable days. Nothing is re-assigned automatically.</div>
+    </div>
+
+    <div class="quick">
+      <button id="q-mine">All mine</button>
+      <button id="q-theirs">All theirs</button>
+      <button id="q-both">Both</button>
+      <button id="q-clear">Clear</button>
+    </div>
+
+    <textarea id="m-note" placeholder="Note for this day (school trip, doctor, hand-over time&hellip;)"></textarea>
+
+    <div class="m-warn hide" id="m-warn"></div>
+
+    <details class="range">
+      <summary>Apply to a date range</summary>
+      <div class="range-body">
+        <div class="row"><input type="date" id="r-from"><span style="color:var(--muted)">&rarr;</span><input type="date" id="r-to"></div>
+        <div class="dows" id="r-dows"></div>
+        <div style="font-size:11px;color:var(--muted)">Copies the &#9728;/&#127769; ticks and your &#8856; flag above onto every selected date. Locked days are skipped.</div>
+        <button class="btn" id="r-apply">Apply to range</button>
+      </div>
+    </details>
+
+    <div class="lock-row">
+      <button class="lockchip mum" id="lock-mum" data-role="mum">
+        <span class="ic">🔓</span><span class="nm"></span>
+      </button>
+      <button class="lockchip dad" id="lock-dad" data-role="dad">
+        <span class="ic">🔓</span><span class="nm"></span>
+      </button>
+    </div>
+    <div class="modal-actions">
+      <span class="spacer"></span>
+      <button class="btn" id="m-close">Close</button>
+    </div>
+    <div class="m-log" id="m-log"></div>
+  </div>
+</div>
+
+<!-- ---------------- account modal ---------------- -->
+<div class="modal-backdrop" id="acct-backdrop">
+  <div class="modal" role="dialog" aria-modal="true">
+    <h3>My account</h3>
+    <div class="m-sub" id="acct-sub"></div>
+    <div class="acct-preview" id="acct-preview"></div>
+
+    <div class="field">
+      <label for="acct-name">Display name</label>
+      <input id="acct-name" maxlength="40" autocomplete="off">
+      <div class="note">Shown in the wedding font at the top, in your colour.</div>
+    </div>
+    <div class="field">
+      <label for="acct-user">Username (for signing in)</label>
+      <input id="acct-user" maxlength="32" autocapitalize="none" autocomplete="off">
+      <div class="note">Small letters, digits, dot, dash and underscore.</div>
+    </div>
+
+    <div class="fieldset-t">CHANGE PASSWORD &mdash; leave blank to keep the current one</div>
+    <div class="field">
+      <label for="acct-new">New password</label>
+      <input id="acct-new" type="password" autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label for="acct-new2">Repeat new password</label>
+      <input id="acct-new2" type="password" autocomplete="new-password">
+    </div>
+
+    <div class="fieldset-t">CONFIRM IT IS YOU</div>
+    <div class="field">
+      <label for="acct-cur">Your current password</label>
+      <input id="acct-cur" type="password" autocomplete="current-password">
+    </div>
+
+    <div class="m-warn hide" id="acct-warn"></div>
+    <div class="m-ok hide" id="acct-ok"></div>
+
+    <div class="modal-actions">
+      <span class="spacer"></span>
+      <button class="btn" id="acct-cancel">Cancel</button>
+      <button class="btn primary" id="acct-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const DOW = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const MONTHS = ["January","February","March","April","May","June",
+                "July","August","September","October","November","December"];
+const ROLES = ["mum","dad"];      // the data model - never changes
+let ORDER = ["mum","dad"];         // display order only, from config.display_order
+
+let S = null;                 // server state
+let HOL = {};                 // year -> {iso: info}
+let holPending = {};
+let view = new Date();        // month being displayed
+let openDate = null;          // iso of the day in the modal
+let scope = "month";
+let pollTimer = null;
+
+/* ---------- helpers ---------- */
+const $ = (id) => document.getElementById(id);
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (d) => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+const fromIso = (s) => { const [y,m,d] = s.split("-").map(Number); return new Date(y, m-1, d); };
+const other = (r) => (r === "mum" ? "dad" : "mum");
+// emoji padlocks cannot be tinted (they are colour glyphs), so draw our own
+const padlock = (locked, px) => '<svg class="pad" viewBox="0 0 24 24" width="' + px + '" height="' + px
+  + '" aria-hidden="true"><path d="' + (locked ? "M7 11V7.5a5 5 0 0 1 10 0V11" : "M7 11V7.5a5 5 0 0 1 9.6-1.9")
+  + '" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/>'
+  + '<rect x="3.7" y="10.6" width="16.6" height="11" rx="2.6" fill="currentColor"/></svg>';
+
+const blank = () => ({ day:{mum:false,dad:false}, night:{mum:false,dad:false},
+                       off:{mum:false,dad:false}, lock:{mum:false,dad:false}, note:"", rev:0, log:[] });
+const dayOf = (isoStr) => (S && S.days[isoStr]) || blank();
+const nameOf = (r) => S.parents[r].display_name;
+const holOf = (isoStr) => (HOL[isoStr.slice(0,4)] || {})[isoStr] || null;
+const isWeekend = (d) => d.getDay() === 0 || d.getDay() === 6;
+const mono = (n) => (n === 1 ? "" : "s");
+
+function isoWeek(d) {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dn = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - dn);
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return Math.ceil(((t - y0) / 86400000 + 1) / 7);
+}
+
+let saveTimer = null;
+function flash(text, cls) {
+  const el = $("save-dot");
+  el.textContent = text;
+  el.className = cls || "";
+  clearTimeout(saveTimer);
+  if (cls !== "bad") saveTimer = setTimeout(() => { el.textContent = ""; el.className = ""; }, 2200);
+}
+
+/* ---------- server ---------- */
+async function api(path, body) {
+  const opt = body
+    ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+    : {};
+  const resp = await fetch(path, opt);
+  if (resp.status === 401) { location.href = "/login"; throw new Error("signed out"); }
+  const json = await resp.json().catch(() => ({}));
+  if (!resp.ok) { const err = new Error(json.error || ("HTTP " + resp.status)); err.status = resp.status; err.data = json; throw err; }
+  return json;
+}
+
+async function loadState() {
+  S = await api("/api/state");
+  $("brand").textContent = S.instance_name;
+  document.title = S.instance_name;
+  $("name-mum").textContent = nameOf("mum");
+  $("name-dad").textContent = nameOf("dad");
+  const chip = $("me-chip");
+  chip.textContent = S.me.display_name;
+  chip.className = "chip " + S.me.role;
+  document.documentElement.style.setProperty("--mum", S.parents.mum.color);
+  document.documentElement.style.setProperty("--dad", S.parents.dad.color);
+  if (S.holidays) Object.assign(HOL, S.holidays);
+  if (Array.isArray(S.display_order) && S.display_order.length === 2) ORDER = S.display_order;
+  document.documentElement.dataset.first = ORDER[0];
+}
+
+async function ensureHolidays(years) {
+  const want = years.filter((y) => !HOL[y] && !holPending[y]);
+  if (!want.length) return;
+  want.forEach((y) => { holPending[y] = true; });
+  try {
+    const res = await api("/api/holidays?" + want.map((y) => "year=" + y).join("&"));
+    Object.assign(HOL, res.holidays);
+  } catch (e) { /* calendar still works without holidays */ }
+  want.forEach((y) => { delete holPending[y]; });
+  render();
+}
+
+async function push(isoStr, changes, baseRev) {
+  flash("saving…");
+  try {
+    const res = await api("/api/day", { date: isoStr, changes: changes, base_rev: baseRev });
+    S.rev = res.rev;
+    if (res.day && !isBlankDay(res.day)) S.days[isoStr] = res.day; else delete S.days[isoStr];
+    flash(res.changed ? "saved" : "no change", "ok");
+    render();
+    if (openDate === isoStr) fillModal();
+    return true;
+  } catch (e) {
+    if (e.status === 409) { flash(e.message, "bad"); await loadState(); render(); if (openDate) fillModal(); }
+    else flash(e.message || "save failed", "bad");
+    return false;
+  }
+}
+
+function isBlankDay(d) {
+  if ((d.note || "").trim()) return false;
+  return !["day","night","off","lock"].some((g) => ROLES.some((r) => d[g][r]));
+}
+
+/* ---------- calendar ---------- */
+function monthCells() {
+  const first = new Date(view.getFullYear(), view.getMonth(), 1);
+  const start = new Date(first);
+  start.setDate(1 - ((first.getDay() + 6) % 7));           // back to Monday
+  const cells = [];
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start); d.setDate(start.getDate() + i);
+    cells.push(d);
+    if (i >= 34 && d.getMonth() !== view.getMonth() && (i + 1) % 7 === 0) break;
+  }
+  return cells;
+}
+
+function slotClass(rec, group) {
+  const m = rec[group].mum, f = rec[group].dad;
+  if (m && f) return "both";
+  if (m) return "mum";
+  if (f) return "dad";
+  return "none";
+}
+
+function slotLabel(rec, group) {
+  const m = rec[group].mum, f = rec[group].dad;
+  if (m && f) return nameOf("mum") + " + " + nameOf("dad");
+  if (m) return nameOf("mum");
+  if (f) return nameOf("dad");
+  return "–";
+}
+
+function renderCalendar() {
+  const grid = $("cal-grid");
+  grid.textContent = "";
+  $("cal-month-label").textContent = MONTHS[view.getMonth()] + " " + view.getFullYear();
+
+  const head = document.createElement("div");
+  head.className = "cal-cw"; head.textContent = "CW";
+  head.title = "calendar week";
+  grid.appendChild(head);
+  DOW.forEach((d, i) => {
+    const el = document.createElement("div");
+    el.className = "cal-dow" + (i > 4 ? " we" : "");
+    el.textContent = d;
+    grid.appendChild(el);
+  });
+
+  const cells = monthCells();
+  const today = S.today;
+  cells.forEach((d, i) => {
+    if (i % 7 === 0) {
+      const wk = document.createElement("div");
+      wk.className = "cal-cw"; wk.textContent = isoWeek(d);
+      wk.title = "calendar week " + isoWeek(d);
+      grid.appendChild(wk);
+    }
+    const key = iso(d);
+    const rec = dayOf(key);
+    const hol = holOf(key);
+    const cell = document.createElement("div");
+    const cls = ["cal-day"];
+    if (d.getMonth() !== view.getMonth()) cls.push("other-month");
+    if (isWeekend(d)) cls.push("we");
+    if (key === today) cls.push("today");
+    if (hol) cls.push("hol");
+    if (rec.off.mum) cls.push("off-mum");
+    if (rec.off.dad) cls.push("off-dad");
+    if (rec.off.mum || rec.off.dad) cls.push("has-off");
+    if (rec.off.mum && rec.off.dad) cls.push("conflict");
+    if (rec.lock.mum || rec.lock.dad) cls.push("locked");
+    cell.className = cls.join(" ");
+    cell.dataset.date = key;
+
+    const badges = [];
+    if (hol) badges.push("🎉");
+    if (rec.off.mum && rec.off.dad) badges.push("⚠");
+    if ((rec.note || "").trim()) badges.push("📝");
+    // one padlock per parent who locked it, in that parent's colour
+    const locks = ROLES.filter((r) => rec.lock[r])
+      .map((r) => '<span class="lk ' + r + '" title="locked by ' + nameOf(r) + '">'
+        + padlock(true, 11) + "</span>").join("");
+
+    const hd = document.createElement("div");
+    hd.className = "cal-day-head";
+    hd.innerHTML = '<span class="num">' + d.getDate() + '</span><span class="badges">'
+      + badges.join("") + locks + "</span>";
+    hd.title = "Open details";
+    cell.appendChild(hd);
+
+    [["day", "☀"], ["night", "🌙"]].forEach(([group, icon]) => {
+      const s = document.createElement("div");
+      const k = slotClass(rec, group);
+      s.className = "slot " + k;
+      // a NO-day only suggests: highlight an undecided slot the other parent should take
+      if (k === "none" && (rec.off.mum !== rec.off.dad)) s.classList.add("suggest");
+      s.dataset.group = group;
+      s.innerHTML = icon + ' <span class="who">' + shortWho(rec, group) + "</span>";
+      s.title = (group === "day" ? "Day: " : "Night: ") + slotLabel(rec, group) + " — click to cycle";
+      cell.appendChild(s);
+    });
+
+    let tip = DOW[(d.getDay() + 6) % 7] + " " + key;
+    if (hol) tip += "\n🎉 " + hol.name_bg + " (" + hol.name_en + ")";
+    if (rec.off.mum) tip += "\n⊘ " + nameOf("mum") + " unavailable";
+    if (rec.off.dad) tip += "\n⊘ " + nameOf("dad") + " unavailable";
+    if ((rec.note || "").trim()) tip += "\n📝 " + rec.note;
+    const lockedBy = ROLES.filter((r) => rec.lock[r]).map(nameOf);
+    if (lockedBy.length) tip += "\n🔒 locked by " + lockedBy.join(" and ") + " — no changes possible";
+    cell.title = tip;
+    grid.appendChild(cell);
+  });
+}
+
+function shortWho(rec, group) {
+  const m = rec[group].mum, f = rec[group].dad;
+  const nm = nameOf("mum"), nd = nameOf("dad");
+  if (m && f) return nm.charAt(0) + "+" + nd.charAt(0);
+  if (m) return nm;
+  if (f) return nd;
+  return "–";
+}
+
+/* ---------- statistics ---------- */
+function scopeRange() {
+  if (scope === "month") {
+    return [iso(new Date(view.getFullYear(), view.getMonth(), 1)),
+            iso(new Date(view.getFullYear(), view.getMonth() + 1, 0))];
+  }
+  if (scope === "year") {
+    return [view.getFullYear() + "-01-01", view.getFullYear() + "-12-31"];
+  }
+  if (scope === "custom") {
+    const a = $("range-from").value, b = $("range-to").value;
+    if (a && b) return a <= b ? [a, b] : [b, a];
+    return null;
+  }
+  const keys = Object.keys(S.days).sort();
+  return keys.length ? [keys[0], keys[keys.length - 1]] : null;
+}
+
+function computeStats() {
+  const range = scopeRange();
+  const empty = { dates: 0, day: {mum:0,dad:0}, night: {mum:0,dad:0},
+                  shared: {day:0,night:0}, open: {day:0,night:0},
+                  off: {mum:0,dad:0}, conflicts: 0, locked: 0,
+                  we: {mum:0,dad:0}, hol: {mum:0,dad:0}, notes: [] };
+  if (!range) return Object.assign(empty, { range: null });
+  const st = Object.assign(empty, { range: range });
+  const end = fromIso(range[1]);
+  const onlyStored = scope === "all";
+  for (let d = fromIso(range[0]); d <= end; d.setDate(d.getDate() + 1)) {
+    const key = iso(d);
+    const has = Object.prototype.hasOwnProperty.call(S.days, key);
+    if (onlyStored && !has) continue;
+    const rec = dayOf(key);
+    st.dates++;
+    ["day","night"].forEach((g) => {
+      const m = rec[g].mum, f = rec[g].dad;
+      if (m) st[g].mum++;
+      if (f) st[g].dad++;
+      if (m && f) st.shared[g]++;
+      if (!m && !f) st.open[g]++;
+    });
+    const nights = { mum: rec.night.mum, dad: rec.night.dad };
+    if (isWeekend(d)) ROLES.forEach((r) => { if (rec.day[r] || nights[r]) st.we[r]++; });
+    if (holOf(key)) ROLES.forEach((r) => { if (rec.day[r] || nights[r]) st.hol[r]++; });
+    ROLES.forEach((r) => { if (rec.off[r]) st.off[r]++; });
+    if (rec.off.mum && rec.off.dad) st.conflicts++;
+    if (rec.lock.mum || rec.lock.dad) st.locked++;
+    if ((rec.note || "").trim()) st.notes.push([key, rec.note]);
+  }
+  return st;
+}
+
+function row(label, vals, cls, sub) {
+  return '<div class="stat-row ' + (cls || "") + '"><span class="lbl">' + label
+    + (sub ? ' <span class="sub">' + sub + "</span>" : "")
+    + "</span>" + ORDER.map((r) => "<b>" + vals[r] + "</b>").join("") + "</div>";
+}
+
+function renderStats() {
+  const st = computeStats();
+  const box = $("stats-body");
+  if (!st.range) { box.innerHTML = '<div class="sub" style="color:var(--muted)">Nothing scheduled yet.</div>'; return; }
+  const tot = { mum: st.day.mum + st.night.mum, dad: st.day.dad + st.night.dad };
+  const sum = tot.mum + tot.dad;
+  const pm = sum ? Math.round((tot.mum / sum) * 100) : 50;
+  let html = "";
+  html += '<div class="stat-head"><span>' + st.range[0] + " → " + st.range[1]
+        + "</span>" + ORDER.map((r) => '<span class="' + r + '-h">' + nameOf(r) + "</span>").join("")
+        + "</div>";
+  html += row("☀ Days", st.day);
+  html += row("🌙 Nights", st.night);
+  html += row("Total slots", tot, "total");
+  html += row("⊘ Cannot take", st.off);
+  html += row("Weekend days", st.we, "", "sat/sun");
+  html += row("🎉 Holidays", st.hol, "", "official");
+  const pct = { mum: sum ? pm : 50, dad: sum ? 100 - pm : 50 };
+  html += '<div class="bar">'
+        + ORDER.map((r) => '<i class="b-' + r + '" style="width:' + pct[r] + '%"></i>').join("")
+        + "</div>";
+  html += '<div class="bar-legend">'
+        + ORDER.map((r) => '<span style="color:var(--' + r + ')">' + (sum ? pct[r] : 0) + "% "
+            + nameOf(r) + "</span>").join("")
+        + "</div>";
+  html += '<div class="stat-row" style="border-top:1px solid var(--line);margin-top:10px">'
+        + '<span class="lbl">Shared &#9728;/&#127769;</span><b>' + st.shared.day + "</b><b>" + st.shared.night + "</b></div>";
+  html += '<div class="stat-row"><span class="lbl">Not decided &#9728;/&#127769;</span><b>'
+        + st.open.day + "</b><b>" + st.open.night + "</b></div>";
+  html += '<div class="stat-row"><span class="lbl">&#9888; Both unavailable</span><b>'
+        + st.conflicts + "</b><b></b></div>";
+  html += '<div class="stat-row"><span class="lbl">&#128274; Locked days</span><b>'
+        + st.locked + "</b><b></b></div>";
+  html += '<div class="stat-row" style="border-top:1px solid var(--line)">'
+        + '<span class="lbl">Dates counted</span><b>' + st.dates + "</b><b></b></div>";
+  if (st.notes.length) {
+    html += '<div class="notes-list"><b style="font-size:12px">Notes</b>'
+      + st.notes.map(([k, n]) => '<div class="ni"><em>' + k.slice(5) + "</em><span>"
+        + n.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c])) + "</span></div>").join("")
+      + "</div>";
+  }
+  box.innerHTML = html;
+}
+
+function render() {
+  if (!S) return;
+  $("lg-n-mum").textContent = nameOf("mum");
+  $("lg-n-dad").textContent = nameOf("dad");
+  $("lg-lock").innerHTML = '<span style="color:var(--mum-line)">' + padlock(true, 12) + "</span>"
+    + '<span style="color:var(--dad-line)">' + padlock(true, 12) + "</span> locked (no changes)";
+  renderCalendar();
+  renderStats();
+}
+
+/* ---------- modal ---------- */
+function openModal(isoStr) {
+  openDate = isoStr;
+  $("r-from").value = isoStr;
+  $("r-to").value = isoStr;
+  fillModal();
+  $("modal-backdrop").classList.add("open");
+  if (location.hash.slice(1) !== isoStr) history.replaceState(null, "", "#" + isoStr);
+}
+function closeModal() {
+  openDate = null;
+  $("modal-backdrop").classList.remove("open");
+  if (location.hash) history.replaceState(null, "", location.pathname);
+}
+
+function fillModal() {
+  const key = openDate;
+  if (!key) return;
+  const rec = dayOf(key);
+  const d = fromIso(key);
+  const hol = holOf(key);
+  const me = S.me.role, them = other(me);
+  const lockedRoles = ROLES.filter((r) => rec.lock[r]);
+  const frozen = lockedRoles.length > 0;
+
+  $("m-title").textContent = DOW[(d.getDay() + 6) % 7] + ", " + d.getDate() + " "
+    + MONTHS[d.getMonth()] + " " + d.getFullYear();
+  $("m-sub").innerHTML = "week " + isoWeek(d)
+    + (hol ? ' &middot; <span class="hol">&#127881; ' + hol.name_bg + " (" + hol.name_en + ")</span>" : "");
+
+  document.querySelectorAll(".pick").forEach((el) => {
+    const g = el.dataset.g, r = el.dataset.r;
+    const cb = el.querySelector("input");
+    cb.checked = rec[g][r];
+    cb.disabled = frozen;
+    el.classList.toggle("on", rec[g][r]);
+    el.querySelector("span").textContent = nameOf(r);
+  });
+
+  $("off-mine-cb").checked = rec.off[me];
+  $("off-mine-cb").disabled = frozen;
+  $("off-mine").querySelector("span").textContent =
+    "⊘ I (" + nameOf(me) + ") cannot take the kids this date";
+  $("off-theirs-cb").checked = rec.off[them];
+  $("off-theirs").querySelector("span").textContent =
+    "⊘ " + nameOf(them) + " cannot take the kids this date";
+
+  $("m-note").value = rec.note || "";
+  $("m-note").disabled = frozen;
+
+  ROLES.forEach((r) => {
+    const chip = $("lock-" + r);
+    const on = rec.lock[r];
+    const mine = r === me;
+    chip.classList.toggle("on", on);
+    chip.classList.toggle("mine", mine);
+    chip.classList.toggle("theirs", !mine);
+    chip.querySelector(".ic").innerHTML = padlock(on, 15);
+    chip.querySelector(".nm").innerHTML = nameOf(r)
+      + '<br><span class="sub">' + (on ? "locked" : "not locked")
+      + (mine ? " · tap to " + (on ? "unlock" : "lock") : "") + "</span>";
+    chip.title = mine
+      ? (on ? "Remove your lock so the day can be changed again"
+            : "Freeze this day — neither of you can change it until you unlock")
+      : nameOf(r) + (on ? " locked this day. Only they can unlock it."
+                        : " has not locked this day.");
+  });
+
+  const banner = $("m-locked");
+  if (frozen) {
+    const who = lockedRoles.map(nameOf).join(" and ");
+    banner.innerHTML = '<span style="color:' + S.parents[lockedRoles[0]].color + '">'
+      + padlock(true, 17) + "</span> <b>Locked by " + who + "</b> — no changes are possible on this day."
+      + (rec.lock[me]
+          ? " Unlock your padlock below to edit it."
+          : " Only " + nameOf(them) + " can remove that lock.");
+  }
+  banner.classList.toggle("hide", !frozen);
+
+  const warn = $("m-warn");
+  const msgs = [];
+  if (rec.off.mum && rec.off.dad) msgs.push("⚠ Neither of you can take the kids on this date.");
+  else if (rec.off[them]) msgs.push(nameOf(them) + " is unavailable — you probably take this day.");
+  else if (rec.off[me]) msgs.push("You are unavailable — " + nameOf(them) + " probably takes this day.");
+  warn.innerHTML = msgs.join("<br>");
+  warn.classList.toggle("hide", !msgs.length);
+
+  const log = (rec.log || []).slice().reverse();
+  $("m-log").innerHTML = log.length
+    ? "<b>History</b><br>" + log.map((l) => l.ts.replace("T", " ") + " &mdash; " + l.by + ": " + l.what).join("<br>")
+    : "";
+  document.querySelectorAll(".quick button, #r-apply").forEach((b) => { b.disabled = frozen; });
+}
+
+function modalChanges() {
+  const ch = { day: {}, night: {} };
+  document.querySelectorAll(".pick").forEach((el) => {
+    ch[el.dataset.g][el.dataset.r] = el.querySelector("input").checked;
+  });
+  ch.off = {}; ch.off[S.me.role] = $("off-mine-cb").checked;
+  return ch;
+}
+
+async function saveFromModal(extra) {
+  const rec = dayOf(openDate);
+  const ch = Object.assign(modalChanges(), extra || {});
+  ch.note = $("m-note").value;
+  await push(openDate, ch, rec.rev);
+}
+
+function setPicks(dayOwner, nightOwner) {
+  document.querySelectorAll(".pick").forEach((el) => {
+    const want = (el.dataset.g === "day" ? dayOwner : nightOwner);
+    const on = want === "both" || want === el.dataset.r;
+    el.querySelector("input").checked = on;
+    el.classList.toggle("on", on);
+  });
+}
+
+/* ---------- events ---------- */
+$("cal-prev").onclick = () => { view = new Date(view.getFullYear(), view.getMonth() - 1, 1); afterMonth(); };
+$("cal-next").onclick = () => { view = new Date(view.getFullYear(), view.getMonth() + 1, 1); afterMonth(); };
+$("cal-today").onclick = () => { view = fromIso(S.today); afterMonth(); };
+
+function afterMonth() {
+  const y = view.getFullYear();
+  render();
+  ensureHolidays([String(y - 1), String(y), String(y + 1)]);
+}
+
+$("cal-grid").addEventListener("click", (ev) => {
+  const cell = ev.target.closest(".cal-day");
+  if (!cell) return;
+  const key = cell.dataset.date;
+  const slot = ev.target.closest(".slot");
+  if (slot) {
+    const rec = dayOf(key);
+    const lockedBy = ROLES.filter((r) => rec.lock[r]).map(nameOf);
+    if (lockedBy.length) { flash("🔒 locked by " + lockedBy.join(" & "), "bad"); return; }
+    const g = slot.dataset.group;
+    const me = S.me.role, them = other(me);
+    const cur = rec[g];
+    // cycle: none -> me -> them -> both -> none
+    let next;
+    if (!cur.mum && !cur.dad) next = { [me]: true, [them]: false };
+    else if (cur[me] && !cur[them]) next = { [me]: false, [them]: true };
+    else if (!cur[me] && cur[them]) next = { mum: true, dad: true };
+    else next = { mum: false, dad: false };
+    const ch = {}; ch[g] = next;
+    push(key, ch, rec.rev);
+    return;
+  }
+  openModal(key);
+});
+
+document.querySelectorAll(".pick").forEach((el) => {
+  el.querySelector("input").addEventListener("change", () => {
+    el.classList.toggle("on", el.querySelector("input").checked);
+    saveFromModal();
+  });
+});
+$("off-mine-cb").addEventListener("change", () => saveFromModal());
+$("m-note").addEventListener("change", () => saveFromModal());
+$("q-mine").onclick = () => { setPicks(S.me.role, S.me.role); saveFromModal(); };
+$("q-theirs").onclick = () => { const t = other(S.me.role); setPicks(t, t); saveFromModal(); };
+$("q-both").onclick = () => { setPicks("both", "both"); saveFromModal(); };
+$("q-clear").onclick = () => { setPicks("none", "none"); saveFromModal(); };
+
+async function toggleLock(role) {
+  const rec = dayOf(openDate);
+  if (role !== S.me.role) {
+    flash("only " + nameOf(role) + " can change that padlock", "bad");
+    return;
+  }
+  flash("saving…");
+  try {
+    const res = await api("/api/lock", { date: openDate, locked: !rec.lock[role] });
+    S.rev = res.rev;
+    if (res.day && !isBlankDay(res.day)) S.days[openDate] = res.day; else delete S.days[openDate];
+    flash(res.day.lock[role] ? "day locked" : "day unlocked", "ok");
+    render(); fillModal();
+  } catch (e) { flash(e.message, "bad"); }
+}
+ROLES.forEach((r) => { $("lock-" + r).onclick = () => toggleLock(r); });
+$("m-close").onclick = closeModal;
+$("modal-backdrop").addEventListener("click", (ev) => { if (ev.target === $("modal-backdrop")) closeModal(); });
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") { closeModal(); $("acct-backdrop").classList.remove("open"); }
+  if (!openDate && ev.target.tagName !== "INPUT" && ev.target.tagName !== "TEXTAREA") {
+    if (ev.key === "ArrowLeft") $("cal-prev").click();
+    if (ev.key === "ArrowRight") $("cal-next").click();
+  }
+});
+
+// weekday filter chips for the range tool
+DOW.forEach((d, i) => {
+  const l = document.createElement("label");
+  l.className = "on";
+  l.innerHTML = '<input type="checkbox" value="' + i + '" checked>' + d[0] + (i === 2 ? "e" : "");
+  l.querySelector("input").addEventListener("change", (e) => l.classList.toggle("on", e.target.checked));
+  $("r-dows").appendChild(l);
+});
+
+$("r-apply").onclick = async () => {
+  const from = $("r-from").value, to = $("r-to").value;
+  if (!from || !to) { flash("pick both dates", "bad"); return; }
+  const weekdays = Array.from($("r-dows").querySelectorAll("input:checked")).map((i) => Number(i.value));
+  if (!weekdays.length) { flash("pick at least one weekday", "bad"); return; }
+  const nDays = Math.round((fromIso(to) - fromIso(from)) / 86400000) + 1;
+  if (!confirm("Apply these ticks to " + nDays + " date" + mono(nDays) + " (" + from + " → " + to + ")?")) return;
+  flash("saving…");
+  try {
+    const res = await api("/api/range", { from: from, to: to, weekdays: weekdays, changes: modalChanges() });
+    S.rev = res.rev;
+    Object.entries(res.changed).forEach(([k, v]) => { if (isBlankDay(v)) delete S.days[k]; else S.days[k] = v; });
+    const n = Object.keys(res.changed).length;
+    flash(n + " day" + mono(n) + " updated", "ok");
+    if (res.skipped_locked.length) alert("Skipped (locked by both): " + res.skipped_locked.join(", "));
+    render(); fillModal();
+  } catch (e) { flash(e.message, "bad"); }
+};
+
+$("scope").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button");
+  if (!btn) return;
+  scope = btn.dataset.scope;
+  $("scope").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === btn));
+  $("custom-range").classList.toggle("on", scope === "custom");
+  if (scope === "custom" && !$("range-from").value) {
+    $("range-from").value = iso(new Date(view.getFullYear(), view.getMonth(), 1));
+    $("range-to").value = iso(new Date(view.getFullYear(), view.getMonth() + 1, 0));
+  }
+  if (scope === "year") ensureHolidays([String(view.getFullYear())]);
+  renderStats();
+});
+["range-from", "range-to"].forEach((id) => $(id).addEventListener("change", renderStats));
+
+/* ---------- account ---------- */
+function openAccount() {
+  $("acct-sub").textContent = "You are signed in as " + S.me.role + ". Each of you edits only their own account.";
+  $("acct-name").value = S.me.display_name;
+  $("acct-user").value = S.me.username;
+  $("acct-new").value = ""; $("acct-new2").value = ""; $("acct-cur").value = "";
+  $("acct-warn").classList.add("hide");
+  $("acct-ok").classList.add("hide");
+  updateAcctPreview();
+  $("acct-backdrop").classList.add("open");
+  $("acct-name").focus();
+}
+function updateAcctPreview() {
+  const el = $("acct-preview");
+  el.textContent = $("acct-name").value || S.me.display_name;
+  el.style.color = S.me.color;
+}
+$("acct-name").addEventListener("input", updateAcctPreview);
+$("btn-account").onclick = openAccount;
+$("acct-cancel").onclick = () => $("acct-backdrop").classList.remove("open");
+$("acct-backdrop").addEventListener("click", (ev) => {
+  if (ev.target === $("acct-backdrop")) $("acct-backdrop").classList.remove("open");
+});
+$("acct-save").onclick = async () => {
+  const warn = $("acct-warn"), okBox = $("acct-ok");
+  const fail = (msg) => { warn.textContent = msg; warn.classList.remove("hide"); okBox.classList.add("hide"); };
+  warn.classList.add("hide"); okBox.classList.add("hide");
+  const np = $("acct-new").value, np2 = $("acct-new2").value;
+  if (np !== np2) return fail("The two new passwords are not the same.");
+  if (np && np.length < 4) return fail("Use at least 4 characters for the password.");
+  if (!$("acct-cur").value) return fail("Type your current password to confirm the change.");
+  const body = { current_password: $("acct-cur").value,
+                 display_name: $("acct-name").value, username: $("acct-user").value };
+  if (np) body.new_password = np;
+  try {
+    const res = await api("/api/account", body);
+    if (!res.changed.length) { okBox.textContent = "Nothing to change."; okBox.classList.remove("hide"); return; }
+    S.parents = res.parents; S.me = res.me;
+    $("name-mum").textContent = nameOf("mum");
+    $("name-dad").textContent = nameOf("dad");
+    $("me-chip").textContent = S.me.display_name;
+    $("acct-new").value = ""; $("acct-new2").value = ""; $("acct-cur").value = "";
+    okBox.textContent = "Saved: " + res.changed.join(", ") + ".";
+    okBox.classList.remove("hide");
+    flash("account updated", "ok");
+    render();
+  } catch (e) { fail(e.message || "Could not save."); }
+};
+
+$("btn-refresh-hol").onclick = async () => {
+  const y = view.getFullYear();
+  flash("fetching…");
+  try {
+    const res = await api("/api/holidays?refresh=1&year=" + (y - 1) + "&year=" + y + "&year=" + (y + 1));
+    Object.assign(HOL, res.holidays);
+    flash("holidays updated", "ok"); render();
+  } catch (e) { flash("holiday fetch failed", "bad"); }
+};
+
+/* ---------- live sync ---------- */
+async function poll() {
+  try {
+    const res = await api("/api/rev");
+    if (res.rev !== S.rev) {
+      await loadState();
+      render();
+      if (openDate) fillModal();
+      flash("updated by " + nameOf(other(S.me.role)), "ok");
+    }
+  } catch (e) { /* offline; try again next tick */ }
+}
+
+(async function init() {
+  await loadState();
+  view = fromIso(S.today);
+  render();
+  await ensureHolidays([String(view.getFullYear() - 1), String(view.getFullYear()),
+                        String(view.getFullYear() + 1)]);
+  const deep = location.hash.slice(1);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(deep)) { view = fromIso(deep); afterMonth(); openModal(deep); }
+  pollTimer = setInterval(poll, Math.max(3, S.poll_seconds || 10) * 1000);
+})();
+</script>
+</body>
+</html>

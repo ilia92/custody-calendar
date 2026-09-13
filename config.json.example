@@ -1,0 +1,25 @@
+{
+  "instance_name": "Custody Calendar",
+  "port": 8880,
+  "country": "BG",
+  "poll_seconds": 10,
+  "backup_dir": "../backup_custody_calendar",
+  "parents": {
+    "mum": {
+      "username": "mum",
+      "display_name": "Mum",
+      "password": "changeme",
+      "color": "#ec4899"
+    },
+    "dad": {
+      "username": "dad",
+      "display_name": "Dad",
+      "password": "changeme",
+      "color": "#3b82f6"
+    }
+  },
+  "display_order": [
+    "mum",
+    "dad"
+  ]
+}

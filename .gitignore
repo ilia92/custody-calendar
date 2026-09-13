@@ -1,0 +1,17 @@
+# your own settings and accounts - never commit these
+config.json
+
+# the database and its caches
+data.json
+holidays.json
+*.tmp
+
+# python
+__pycache__/
+*.py[cod]
+
+# editors / os
+.vscode/
+.idea/
+*.swp
+.DS_Store
