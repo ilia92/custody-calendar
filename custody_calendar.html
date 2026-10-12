@@ -443,7 +443,7 @@ let holPending = {};
 let view = new Date();        // month being displayed
 let openDate = null;          // iso of the day in the modal
 let scope = "month";
-let pollTimer = null;
+let noteBase = "";            // the note text the popup's note box started from (server copy)
 
 /* ---------- helpers ---------- */
 const $ = (id) => document.getElementById(id);
@@ -522,21 +522,86 @@ async function ensureHolidays(years) {
   render();
 }
 
-async function push(isoStr, changes, baseRev) {
+/* ---------- writes ----------
+ * Every edit updates S.days immediately (so a fast second click builds on the first), then goes
+ * to the server through an in-order queue. The server merges per slot, so the other parent's
+ * edits to other slots never conflict. Each response carries the authoritative day; it is applied
+ * once no later edit for that date is still queued. A refused write reloads the true state. */
+let writeChain = Promise.resolve();
+let pendingWrites = 0;
+const pendingByDate = {};
+let drainWaiters = [];
+
+function setDay(isoStr, rec) {
+  if (!rec || isBlankDay(rec)) delete S.days[isoStr]; else S.days[isoStr] = rec;
+}
+
+function applyLocal(isoStr, changes) {
+  const rec = JSON.parse(JSON.stringify(dayOf(isoStr)));
+  ["day", "night", "off", "lock"].forEach((g) => { if (changes[g]) Object.assign(rec[g], changes[g]); });
+  if (changes.note !== undefined) rec.note = changes.note;
+  setDay(isoStr, rec);
+}
+
+function waitForDrain() {
+  return pendingWrites ? new Promise((r) => drainWaiters.push(r)) : Promise.resolve();
+}
+
+function enqueue(dates, send) {
+  pendingWrites++;
+  dates.forEach((d) => { pendingByDate[d] = (pendingByDate[d] || 0) + 1; });
+  const job = writeChain.then(async () => {
+    try { return await send(); }
+    finally {
+      dates.forEach((d) => { if (--pendingByDate[d] === 0) delete pendingByDate[d]; });
+      if (--pendingWrites === 0) { const w = drainWaiters; drainWaiters = []; w.forEach((r) => r()); }
+    }
+  });
+  writeChain = job.catch(() => {});
+  return job;
+}
+
+// A write response moves our revision forward only if nothing else happened in between;
+// otherwise the live sync fetches what we missed.
+function acceptRev(res) { if (res.since === S.rev) S.rev = res.rev; }
+function acceptDay(isoStr, day) { if ((pendingByDate[isoStr] || 0) <= 1) setDay(isoStr, day); }
+
+function refreshViews(isoStr) {
+  render();
+  if (openDate && (!isoStr || openDate === isoStr)) fillModal();
+}
+
+async function writeFailed(e) {
+  flash(e.message || "save failed", "bad");
+  const keepNote = e.data && e.data.conflict === "note" ? $("m-note").value : null;
+  try { await loadState(); } catch (_) { /* offline - the live sync retries */ }
+  refreshViews();
+  if (keepNote !== null && openDate) $("m-note").value = keepNote;   // don't lose what was typed
+}
+
+// changes: {day|night|off|lock: {role: bool}, note?}. Applied locally at once, then saved.
+function push(isoStr, changes, opts) {
+  opts = opts || {};
+  applyLocal(isoStr, changes);
+  refreshViews(isoStr);
   flash("saving…");
-  try {
-    const res = await api("/api/day", { date: isoStr, changes: changes, base_rev: baseRev });
-    S.rev = res.rev;
-    if (res.day && !isBlankDay(res.day)) S.days[isoStr] = res.day; else delete S.days[isoStr];
-    flash(res.changed ? "saved" : "no change", "ok");
-    render();
-    if (openDate === isoStr) fillModal();
-    return true;
-  } catch (e) {
-    if (e.status === 409) { flash(e.message, "bad"); await loadState(); render(); if (openDate) fillModal(); }
-    else flash(e.message || "save failed", "bad");
-    return false;
-  }
+  return enqueue([isoStr], async () => {
+    try {
+      const body = opts.path === "/api/lock"
+        ? { date: isoStr, locked: changes.lock[S.me.role] }
+        : { date: isoStr, changes: changes };
+      if (changes.note !== undefined) body.note_base = opts.noteBase;
+      const res = await api(opts.path || "/api/day", body);
+      acceptRev(res);
+      acceptDay(isoStr, res.day);
+      flash(opts.okText ? opts.okText(res) : (res.changed ? "saved" : "no change"), "ok");
+      refreshViews(isoStr);
+      return true;
+    } catch (e) {
+      await writeFailed(e);
+      return false;
+    }
+  });
 }
 
 function isBlankDay(d) {
@@ -831,8 +896,13 @@ function fillModal() {
   $("off-theirs").querySelector("span").textContent =
     "⊘ " + nameOf(them) + " cannot take the kids this date";
 
-  $("m-note").value = rec.note || "";
-  $("m-note").disabled = frozen;
+  // keep what the user is typing; otherwise show (and remember) the current note
+  const noteEl = $("m-note");
+  if (!(document.activeElement === noteEl && noteEl.value !== noteBase)) {
+    noteEl.value = rec.note || "";
+    noteBase = rec.note || "";
+  }
+  noteEl.disabled = frozen;
 
   ROLES.forEach((r) => {
     const chip = $("lock-" + r);
@@ -887,11 +957,29 @@ function modalChanges() {
   return ch;
 }
 
-async function saveFromModal(extra) {
+// Only what the user changed in the popup, relative to the current day - so a tick never
+// re-sends (and undoes) slots the other parent changed meanwhile.
+function modalDiff() {
   const rec = dayOf(openDate);
-  const ch = Object.assign(modalChanges(), extra || {});
-  ch.note = $("m-note").value;
-  await push(openDate, ch, rec.rev);
+  const ch = {};
+  document.querySelectorAll(".pick").forEach((el) => {
+    const g = el.dataset.g, r = el.dataset.r, v = el.querySelector("input").checked;
+    if (v !== rec[g][r]) (ch[g] = ch[g] || {})[r] = v;
+  });
+  const me = S.me.role, off = $("off-mine-cb").checked;
+  if (off !== rec.off[me]) ch.off = { [me]: off };
+  const note = $("m-note").value;
+  if (note !== (rec.note || "")) ch.note = note;
+  return ch;
+}
+
+async function saveFromModal() {
+  if (!openDate) return;
+  const ch = modalDiff();
+  if (!Object.keys(ch).length) return;
+  const base = noteBase;
+  if (ch.note !== undefined) noteBase = ch.note;
+  await push(openDate, ch, { noteBase: base });
 }
 
 function setPicks(dayOwner, nightOwner) {
@@ -935,7 +1023,7 @@ $("cal-grid").addEventListener("click", (ev) => {
     else if (!cur[me] && cur[them]) next = { mum: true, dad: true };
     else next = { mum: false, dad: false };
     const ch = {}; ch[g] = next;
-    push(key, ch, rec.rev);
+    push(key, ch);
     return;
   }
   openModal(key);
@@ -949,6 +1037,7 @@ document.querySelectorAll(".pick").forEach((el) => {
 });
 $("off-mine-cb").addEventListener("change", () => saveFromModal());
 $("m-note").addEventListener("change", () => saveFromModal());
+$("m-note").addEventListener("blur", () => saveFromModal());   // also re-saves text kept after a note conflict
 $("q-mine").onclick = () => { setPicks(S.me.role, S.me.role); saveFromModal(); };
 $("q-theirs").onclick = () => { const t = other(S.me.role); setPicks(t, t); saveFromModal(); };
 $("q-both").onclick = () => { setPicks("both", "both"); saveFromModal(); };
@@ -960,15 +1049,10 @@ async function toggleLockOn(isoStr, role) {
     flash("only " + nameOf(role) + " can change that padlock", "bad");
     return;
   }
-  flash("saving…");
-  try {
-    const res = await api("/api/lock", { date: isoStr, locked: !rec.lock[role] });
-    S.rev = res.rev;
-    if (res.day && !isBlankDay(res.day)) S.days[isoStr] = res.day; else delete S.days[isoStr];
-    flash(res.day.lock[role] ? "🔒 " + isoStr.slice(5) + " locked" : "🔓 " + isoStr.slice(5) + " unlocked", "ok");
-    render();
-    if (openDate === isoStr) fillModal();
-  } catch (e) { flash(e.message, "bad"); }
+  await push(isoStr, { lock: { [role]: !rec.lock[role] } }, {
+    path: "/api/lock",
+    okText: (res) => (res.day.lock[role] ? "🔒 " + isoStr.slice(5) + " locked" : "🔓 " + isoStr.slice(5) + " unlocked"),
+  });
 }
 ROLES.forEach((r) => { $("lock-" + r).onclick = () => toggleLockOn(openDate, r); });
 $("m-close").onclick = closeModal;
@@ -998,15 +1082,18 @@ $("r-apply").onclick = async () => {
   const nDays = Math.round((fromIso(to) - fromIso(from)) / 86400000) + 1;
   if (!confirm("Apply these ticks to " + nDays + " date" + mono(nDays) + " (" + from + " → " + to + ")?")) return;
   flash("saving…");
-  try {
-    const res = await api("/api/range", { from: from, to: to, weekdays: weekdays, changes: modalChanges() });
-    S.rev = res.rev;
-    Object.entries(res.changed).forEach(([k, v]) => { if (isBlankDay(v)) delete S.days[k]; else S.days[k] = v; });
-    const n = Object.keys(res.changed).length;
-    flash(n + " day" + mono(n) + " updated", "ok");
-    if (res.skipped_locked.length) alert("Skipped (locked by both): " + res.skipped_locked.join(", "));
-    render(); fillModal();
-  } catch (e) { flash(e.message, "bad"); }
+  const changes = modalChanges();
+  await enqueue([], async () => {
+    try {
+      const res = await api("/api/range", { from: from, to: to, weekdays: weekdays, changes: changes });
+      acceptRev(res);
+      Object.entries(res.changed).forEach(([k, v]) => setDay(k, v));
+      const n = Object.keys(res.changed).length;
+      flash(n + " day" + mono(n) + " updated", "ok");
+      refreshViews();
+      if (res.skipped_locked.length) alert("Skipped (locked): " + res.skipped_locked.join(", "));
+    } catch (e) { await writeFailed(e); }
+  });
 };
 
 $("scope").addEventListener("click", (ev) => {
@@ -1083,17 +1170,59 @@ $("btn-refresh-hol").onclick = async () => {
   } catch (e) { flash("holiday fetch failed", "bad"); }
 };
 
-/* ---------- live sync ---------- */
-async function poll() {
-  try {
-    const res = await api("/api/rev");
-    if (res.rev !== S.rev) {
-      await loadState();
-      render();
-      if (openDate) fillModal();
-      flash("updated by " + nameOf(other(S.me.role)), "ok");
+/* ---------- live sync ----------
+ * A long-poll on /api/changes returns as soon as anything changes (the other parent, another tab,
+ * a script) with just the dates that changed. Hidden tabs pause and catch up when shown; a lost
+ * connection retries with backoff; after a server restart the server sends everything again. */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function whenVisible() {
+  if (!document.hidden) return Promise.resolve();
+  return new Promise((resolve) => {
+    const on = () => { if (!document.hidden) { document.removeEventListener("visibilitychange", on); resolve(); } };
+    document.addEventListener("visibilitychange", on);
+  });
+}
+
+function applyChanges(res) {
+  if (res.reset) { S.days = res.days; S.rev = res.rev; return true; }
+  if (res.since !== S.rev) return false;
+  const keys = Object.keys(res.days);
+  keys.forEach((k) => setDay(k, res.days[k]));
+  S.rev = res.rev;
+  return keys.length > 0;
+}
+
+function changedBy(res) {
+  if (res.reset) return null;
+  const roles = new Set(Object.values(res.days).filter(Boolean)
+    .map((d) => (d.log || []).slice(-1)[0]).filter(Boolean).map((l) => l.role));
+  const them = other(S.me.role);
+  return roles.has(them) ? nameOf(them) : null;
+}
+
+async function liveSync() {
+  let backoff = 1000, offline = false;
+  for (;;) {
+    await whenVisible();
+    await waitForDrain();
+    try {
+      const since = S.rev;
+      const res = await api("/api/changes?since=" + since + "&wait=25");
+      if (offline) { offline = false; flash("reconnected", "ok"); }
+      backoff = 1000;
+      if (pendingWrites || S.rev !== since) continue;   // our own writes landed meanwhile; ask again
+      if (applyChanges(res)) {
+        refreshViews();
+        const who = changedBy(res);
+        flash(who ? "updated by " + who : "updated", "ok");
+      }
+    } catch (e) {
+      if (e.status === 401) return;
+      if (!offline) { offline = true; flash("connection lost — retrying…", "bad"); }
+      await sleep(backoff);
+      backoff = Math.min(backoff * 2, 30000);
     }
-  } catch (e) { /* offline; try again next tick */ }
+  }
 }
 
 (async function init() {
@@ -1104,7 +1233,7 @@ async function poll() {
                         String(view.getFullYear() + 1)]);
   const deep = location.hash.slice(1);
   if (/^\d{4}-\d{2}-\d{2}$/.test(deep)) { view = fromIso(deep); afterMonth(); openModal(deep); }
-  pollTimer = setInterval(poll, Math.max(3, S.poll_seconds || 10) * 1000);
+  liveSync();
 })();
 </script>
 </body>

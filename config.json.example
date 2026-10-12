@@ -2,7 +2,6 @@
   "instance_name": "Custody Calendar",
   "port": 8880,
   "country": "BG",
-  "poll_seconds": 10,
   "backup_dir": "../backup_custody_calendar",
   "parents": {
     "mum": {

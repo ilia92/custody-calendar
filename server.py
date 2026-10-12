@@ -7,6 +7,8 @@ https://github.com/ilia92/task-tree-planner
 Run:   python3 server.py [port]
 Help:  python3 server.py --help
 """
+import collections
+import copy
 import hashlib
 import json
 import os
@@ -14,6 +16,7 @@ import re
 import secrets
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from datetime import date, datetime, timedelta
@@ -49,7 +52,8 @@ class ApiError(Exception):
 
 
 _MGMT_FLAGS = ("--help", "-h", "--hash-password", "--check-holidays",
-                "--refresh-holidays", "--set-user", "--list-users")
+                "--refresh-holidays", "--set-user", "--list-users",
+                "--add-token", "--remove-token", "--list-tokens")
 
 
 # --------------------------------------------------------------------------- config
@@ -247,6 +251,25 @@ def session_token_from(headers):
         return None
 
 
+# API tokens for scripts: config.json "api_tokens": {name: {"hash": sha256, "role": "mum"|"dad"}}.
+# A token acts as that parent, with exactly their permissions. Tokens are 32 random bytes,
+# so an unsalted fast hash is enough.
+TOKEN_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
+
+
+def session_from_bearer(headers):
+    auth = headers.get("Authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        return None
+    maybe_reload_config()
+    digest = hash_password(auth[7:].strip())
+    for name, tok in (CONFIG.get("api_tokens") or {}).items():
+        if isinstance(tok, dict) and tok.get("role") in ROLES \
+                and secrets.compare_digest(str(tok.get("hash", "")), digest):
+            return {"role": tok["role"], "token": name}
+    return None
+
+
 # --------------------------------------------------------------------------- holidays
 
 def orthodox_easter(year):
@@ -320,16 +343,26 @@ def fetch_nager(year, country):
         return json.loads(resp.read().decode("utf-8"))
 
 
+_holiday_mem = {"mtime": None, "cache": {}}
+_holiday_lock = threading.Lock()
+
+
 def holiday_cache():
-    if os.path.exists(HOLIDAYS_PATH):
+    """holidays.json, kept in memory and re-read only when the file changes."""
+    with _holiday_lock:
         try:
-            with open(HOLIDAYS_PATH, encoding="utf-8") as fh:
-                cache = json.load(fh)
-            if isinstance(cache, dict):
-                return cache
-        except Exception:
-            pass
-    return {}
+            mtime = os.path.getmtime(HOLIDAYS_PATH)
+        except OSError:
+            return {}
+        if mtime != _holiday_mem["mtime"]:
+            cache = {}
+            try:
+                with open(HOLIDAYS_PATH, encoding="utf-8") as fh:
+                    cache = json.load(fh)
+            except Exception:
+                pass
+            _holiday_mem.update(mtime=mtime, cache=cache if isinstance(cache, dict) else {})
+        return copy.deepcopy(_holiday_mem["cache"])
 
 
 def get_holidays(year, refresh=False):
@@ -373,7 +406,14 @@ def get_holidays(year, refresh=False):
 # --------------------------------------------------------------------------- data
 
 _data_lock = threading.RLock()
+_data_changed = threading.Condition(_data_lock)
 _data = None
+# (rev, iso) for every change since the server started, so browsers and scripts can catch up
+# incrementally (GET /api/changes). After a restart the log is empty and clients resync fully.
+CHANGE_LOG_SIZE = 5000
+_change_log = collections.deque(maxlen=CHANGE_LOG_SIZE)
+MAX_POLL_WAIT = 30
+MAX_BATCH_OPS = 400
 
 
 def blank_day():
@@ -475,8 +515,15 @@ def parse_changes(changes, role):
     return wants, note
 
 
-def change_day(iso, wants, note, role, username, base_rev=None):
-    """Apply a validated change set to one date. Caller holds _data_lock."""
+def change_day(iso, wants, note, role, username, base_rev=None, note_base=None):
+    """Apply a validated change set to one date. Caller holds _data_lock.
+
+    Changes are merged per slot: setting dad's night never conflicts with the other parent
+    having just changed mum's day. Two guards remain:
+      - note_base: the note the client started editing from; if the note changed since,
+        the write is refused instead of silently overwriting the other parent's text.
+      - base_rev (older clients): refuse if the day changed at all since that revision.
+    """
     day = _data["days"].get(iso) or blank_day()
     locked_by = [r for r in ROLES if day["lock"][r]]
     if locked_by:
@@ -493,6 +540,9 @@ def change_day(iso, wants, note, role, username, base_rev=None):
             raise ApiError(409, msg, {"day": day})
     if base_rev is not None and day["rev"] > base_rev:
         raise ApiError(409, "This day was changed by the other parent. Reloading.", {"day": day})
+    if note is not None and note_base is not None and str(note_base) != day["note"] and note != day["note"]:
+        raise ApiError(409, "The note was changed meanwhile - your text is kept in the box; "
+                            "save again to replace it.", {"day": day, "conflict": "note"})
 
     applied = []
     for group, r, val in wants:
@@ -518,6 +568,103 @@ def change_day(iso, wants, note, role, username, base_rev=None):
     else:
         _data["days"][iso] = day
     return day, True
+
+
+def parse_date(value, field="date"):
+    iso = str(value or "")
+    if not DATE_RE.match(iso):
+        raise ApiError(400, "%s must be YYYY-MM-DD" % field)
+    try:
+        date.fromisoformat(iso)
+    except ValueError:
+        raise ApiError(400, "%s is not a real date" % field)
+    return iso
+
+
+def commit(entries):
+    """Persist and announce applied changes. entries: [(rev, iso)]. Caller holds _data_lock."""
+    if not entries:
+        return
+    write_data()
+    _change_log.extend(sorted(entries))
+    _data_changed.notify_all()
+
+
+def changes_since(since):
+    """What a client at revision `since` needs: the current state of every date changed since
+    (None = now empty), or {reset: True, days: everything} if the log can't cover the gap.
+    Caller holds _data_lock."""
+    cur = _data["rev"]
+    if since == cur:
+        return {"rev": cur, "since": since, "days": {}}
+    entries = [e for e in _change_log if since < e[0] <= cur]
+    if since > cur or len(entries) != cur - since:
+        return {"reset": True, "rev": cur, "days": _data["days"]}
+    isos = sorted({iso for _, iso in entries})
+    return {"rev": cur, "since": since, "days": {iso: _data["days"].get(iso) for iso in isos}}
+
+
+def wait_for_changes(since, wait):
+    """Long-poll: block up to `wait` seconds until the revision moves past `since`.
+    Returns serialized JSON (built under the lock so it can't change mid-send)."""
+    deadline = time.monotonic() + wait
+    with _data_lock:
+        while _data["rev"] == since:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            _data_changed.wait(remaining)
+        return json.dumps(changes_since(since), ensure_ascii=False)
+
+
+def parse_op(op, role, index):
+    """Validate one batch op -> (iso, wants, note, note_base)."""
+    if not isinstance(op, dict):
+        raise ApiError(400, "ops[%d] must be an object" % index)
+    kind = op.get("op")
+    iso = parse_date(op.get("date"), "ops[%d].date" % index)
+    if kind == "day":
+        try:
+            wants, note = parse_changes(op.get("changes") or {}, role)
+        except ApiError as exc:
+            raise ApiError(exc.status, "ops[%d] (%s): %s" % (index, iso, exc.message), exc.payload)
+        return iso, wants, note, op.get("note_base")
+    if kind == "lock":
+        if not isinstance(op.get("locked"), bool):
+            raise ApiError(400, "ops[%d].locked must be true or false" % index)
+        return iso, [("lock", role, op["locked"])], None, None
+    raise ApiError(400, "ops[%d].op must be \"day\" or \"lock\"" % index)
+
+
+def apply_batch(ops, role, username):
+    """Apply a list of day/lock ops all-or-nothing. Caller holds _data_lock."""
+    if not isinstance(ops, list) or not ops:
+        raise ApiError(400, "ops must be a non-empty list")
+    if len(ops) > MAX_BATCH_OPS:
+        raise ApiError(400, "at most %d ops per batch" % MAX_BATCH_OPS)
+    parsed = [parse_op(op, role, i) for i, op in enumerate(ops)]
+    saved_rev = _data["rev"]
+    saved = {iso: copy.deepcopy(_data["days"].get(iso)) for iso, _, _, _ in parsed}
+    entries, results = [], []
+    try:
+        for i, (iso, wants, note, note_base) in enumerate(parsed):
+            try:
+                day, did = change_day(iso, wants, note, role, username, note_base=note_base)
+            except ApiError as exc:
+                raise ApiError(exc.status, "ops[%d] (%s): %s" % (i, iso, exc.message), exc.payload)
+            if did:
+                entries.append((day["rev"], iso))
+            results.append({"date": iso, "changed": did})
+        commit(entries)
+    except BaseException:
+        _data["rev"] = saved_rev
+        for iso, day in saved.items():
+            if day is None:
+                _data["days"].pop(iso, None)
+            else:
+                _data["days"][iso] = day
+        raise
+    return results, {iso: _data["days"].get(iso) for iso in saved}
 
 
 def daterange(start_iso, end_iso, weekdays=None):
@@ -598,6 +745,12 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
+    def log_request(self, code="-", size="-"):
+        # every open tab long-polls /api/changes - don't flood the log with those
+        if str(code) == "200" and self.path.startswith(("/api/changes", "/api/rev")):
+            return
+        super().log_request(code, size)
+
     # -- helpers ----------------------------------------------------------
     def _send(self, status, body, ctype="text/plain; charset=utf-8", extra=None):
         if isinstance(body, str):
@@ -634,7 +787,14 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, html, "text/html; charset=utf-8")
 
     def _session(self):
-        return get_session(session_token_from(self.headers))
+        return session_from_bearer(self.headers) or get_session(session_token_from(self.headers))
+
+    @staticmethod
+    def _actor(sess):
+        """Name recorded in each day's history: the username, or the token name for scripts."""
+        if sess.get("token"):
+            return "%s (token)" % sess["token"]
+        return CONFIG["parents"][sess["role"]]["username"]
 
     def _body(self):
         try:
@@ -703,6 +863,22 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/rev":
                 with _data_lock:
                     return self._json(200, {"rev": _data["rev"]})
+            if path == "/api/changes":
+                try:
+                    since = int(query["since"][0])
+                    wait = int(query.get("wait", ["0"])[0])
+                except (KeyError, ValueError):
+                    raise ApiError(400, "since (and optional wait) must be numbers")
+                body = wait_for_changes(since, max(0, min(wait, MAX_POLL_WAIT)))
+                return self._send(200, body, "application/json; charset=utf-8")
+            if path == "/api/days":
+                start = parse_date((query.get("from") or [""])[0], "from")
+                end = parse_date((query.get("to") or [""])[0], "to")
+                if end < start:
+                    start, end = end, start
+                with _data_lock:
+                    return self._json(200, {"rev": _data["rev"], "days": {
+                        k: v for k, v in sorted(_data["days"].items()) if start <= k <= end}})
             if path == "/api/holidays":
                 years = query.get("year") or [str(date.today().year)]
                 refresh = query.get("refresh", ["0"])[0] in ("1", "true", "yes")
@@ -772,37 +948,48 @@ class Handler(BaseHTTPRequestHandler):
         if not sess:
             return self._json(401, {"error": "Not signed in", "login": "/login"})
         role = sess["role"]
-        username = CONFIG["parents"][role]["username"]
+        username = self._actor(sess)
 
         try:
             payload = self._json_body()
+            if not isinstance(payload, dict):
+                raise ApiError(400, "Body must be a JSON object")
+
             if path == "/api/day":
-                iso = str(payload.get("date") or "")
-                if not DATE_RE.match(iso):
-                    raise ApiError(400, "date must be YYYY-MM-DD")
-                try:
-                    date.fromisoformat(iso)
-                except ValueError:
-                    raise ApiError(400, "not a real date")
+                iso = parse_date(payload.get("date"))
                 wants, note = parse_changes(payload.get("changes") or {}, role)
                 base_rev = payload.get("base_rev")
                 base_rev = int(base_rev) if isinstance(base_rev, (int, float)) else None
                 with _data_lock:
-                    day, changed = change_day(iso, wants, note, role, username, base_rev)
+                    since = _data["rev"]
+                    day, changed = change_day(iso, wants, note, role, username, base_rev,
+                                              payload.get("note_base"))
                     if changed:
-                        write_data()
-                    return self._json(200, {"rev": _data["rev"], "date": iso, "day": day,
-                                            "changed": changed})
+                        commit([(day["rev"], iso)])
+                    return self._json(200, {"rev": _data["rev"], "since": since, "date": iso,
+                                            "day": day, "changed": changed})
+
+            if path == "/api/batch":
+                with _data_lock:
+                    since = _data["rev"]
+                    results, days = apply_batch(payload.get("ops"), role, username)
+                    return self._json(200, {"rev": _data["rev"], "since": since,
+                                            "results": results, "days": days})
 
             if path == "/api/range":
                 wants, note = parse_changes(payload.get("changes") or {}, role)
-                start, end = str(payload.get("from") or ""), str(payload.get("to") or "")
-                if not (DATE_RE.match(start) and DATE_RE.match(end)):
-                    raise ApiError(400, "from/to must be YYYY-MM-DD")
+                start, end = parse_date(payload.get("from"), "from"), parse_date(payload.get("to"), "to")
                 weekdays = payload.get("weekdays")
-                weekdays = {int(w) for w in weekdays if 0 <= int(w) <= 6} if weekdays else None
+                if weekdays:
+                    try:
+                        weekdays = {int(w) for w in weekdays if 0 <= int(w) <= 6}
+                    except (TypeError, ValueError):
+                        raise ApiError(400, "weekdays must be numbers 0 (Mon) - 6 (Sun)")
+                else:
+                    weekdays = None
                 changed, skipped = {}, []
                 with _data_lock:
+                    since = _data["rev"]
                     for iso in daterange(start, end, weekdays):
                         try:
                             day, did = change_day(iso, wants, note, role, username)
@@ -813,12 +1000,13 @@ class Handler(BaseHTTPRequestHandler):
                             raise
                         if did:
                             changed[iso] = day
-                    if changed:
-                        write_data()
-                    return self._json(200, {"rev": _data["rev"], "changed": changed,
+                    commit([(d["rev"], k) for k, d in changed.items()])
+                    return self._json(200, {"rev": _data["rev"], "since": since, "changed": changed,
                                            "skipped_locked": skipped})
 
             if path == "/api/account":
+                if sess.get("token"):
+                    raise ApiError(403, "API tokens cannot change accounts - sign in on the page.")
                 changed = update_account(
                     role,
                     str(payload.get("current_password") or ""),
@@ -832,16 +1020,15 @@ class Handler(BaseHTTPRequestHandler):
                                         "me": self._me(sess)})
 
             if path == "/api/lock":
-                iso = str(payload.get("date") or "")
-                if not DATE_RE.match(iso):
-                    raise ApiError(400, "date must be YYYY-MM-DD")
+                iso = parse_date(payload.get("date"))
                 want = bool(payload.get("locked"))
                 with _data_lock:
+                    since = _data["rev"]
                     day, changed = change_day(iso, [("lock", role, want)], None, role, username)
                     if changed:
-                        write_data()
-                    return self._json(200, {"rev": _data["rev"], "date": iso, "day": day,
-                                            "changed": changed})
+                        commit([(day["rev"], iso)])
+                    return self._json(200, {"rev": _data["rev"], "since": since, "date": iso,
+                                            "day": day, "changed": changed})
         except ApiError as exc:
             return self._json(exc.status, dict({"error": exc.message}, **exc.payload))
         except Exception as exc:  # pragma: no cover - defensive
@@ -865,6 +1052,9 @@ HELP = """Custody Calendar - shared 50/50 custody planner
   python3 server.py --set-user dad   same for dad
   python3 server.py --list-users     show both accounts
   python3 server.py --hash-password  print a SHA-256 hash to put in config.json by hand
+  python3 server.py --add-token NAME --role mum|dad   create an API token acting as that parent
+  python3 server.py --remove-token NAME              revoke a token
+  python3 server.py --list-tokens                    show token names and roles
   python3 server.py --check-holidays [year]    print the computed holiday table
   python3 server.py --refresh-holidays [year]  re-fetch holidays from date.nager.at
 
@@ -909,6 +1099,40 @@ def cmd_set_user(role):
     cmd_list_users()
 
 
+def cmd_add_token(args):
+    name = args[0] if args and not args[0].startswith("--") else ""
+    role = args[args.index("--role") + 1] if "--role" in args and args.index("--role") + 1 < len(args) else ""
+    if not TOKEN_NAME_RE.match(name) or role not in ROLES:
+        sys.exit("Usage: python3 server.py --add-token NAME --role mum|dad")
+    with _config_lock:
+        tokens = CONFIG.setdefault("api_tokens", {})
+        if name in tokens:
+            sys.exit("Token %r already exists - remove it first to rotate it." % name)
+        token = secrets.token_urlsafe(32)
+        tokens[name] = {"hash": hash_password(token), "role": role}
+        save_config()
+    print("API token %r created, acting as %s (%s). Store it now - it is not shown again:\n\n  %s\n"
+          % (name, role, CONFIG["parents"][role]["display_name"], token))
+    print('Use it as:  curl -H "Authorization: Bearer <token>" http://localhost:%d/api/state' % PORT)
+
+
+def cmd_remove_token(name):
+    with _config_lock:
+        if name not in (CONFIG.get("api_tokens") or {}):
+            sys.exit("Token %r not found." % name)
+        del CONFIG["api_tokens"][name]
+        save_config()
+    print("Token %r removed." % name)
+
+
+def cmd_list_tokens():
+    tokens = CONFIG.get("api_tokens") or {}
+    if not tokens:
+        print("No API tokens configured.")
+    for name, tok in sorted(tokens.items()):
+        print("  %-24s acts as %s" % (name, tok.get("role", "?")))
+
+
 def cmd_check_holidays(year, refresh=False):
     holidays = get_holidays(year, refresh) if refresh else bg_holidays(year)
     names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -943,6 +1167,15 @@ def main():
         if pwd != getpass.getpass("Repeat:   "):
             sys.exit("Passwords do not match.")
         print(hash_password(pwd))
+        return
+    if args and args[0] == "--add-token":
+        cmd_add_token(args[1:])
+        return
+    if args and args[0] == "--remove-token":
+        cmd_remove_token(args[1] if len(args) > 1 else "")
+        return
+    if args and args[0] == "--list-tokens":
+        cmd_list_tokens()
         return
     if args and args[0] in ("--check-holidays", "--refresh-holidays"):
         year = int(args[1]) if len(args) > 1 else date.today().year

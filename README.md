@@ -29,8 +29,10 @@ negotiation from scratch. This puts it on one page both parents can edit.
   year, all time or a custom range.
 - **Official holidays**, computed offline (Bulgarian Labour Code art. 154 by default, including
   Orthodox Easter and the weekend-compensation rule), optionally cross-checked online.
-- **Live sync.** Each browser polls for the other parent's edits; no reload needed.
+- **Live sync.** The other parent's edits appear within a second, with no reload. Clicks apply instantly, and two
+  people editing the same day only clash if they change the very same slot.
 - **Per-parent permissions**, enforced on the server rather than hidden in the interface.
+- **API tokens** for scripts, each acting as one parent with exactly that parent's permissions.
 - Works offline, on a LAN, or behind a VPN. The font is vendored; no CDN, no tracking, no accounts
   anywhere but your own machine.
 
@@ -57,7 +59,6 @@ Requirements: **Python 3.8+** and a modern browser. No pip install, no dependenc
   "instance_name": "Custody Calendar",
   "port": 8880,
   "country": "BG",
-  "poll_seconds": 10,
   "display_order": ["mum", "dad"],
   "backup_dir": "../backup_custody_calendar",
   "parents": {
@@ -72,7 +73,6 @@ Requirements: **Python 3.8+** and a modern browser. No pip install, no dependenc
 | `instance_name` | Title in the tab and the top bar |
 | `port` | Listening port (a CLI argument wins: `python3 server.py 9000`) |
 | `country` | Holiday country code, used when refreshing from date.nager.at |
-| `poll_seconds` | How often each browser checks for the other parent's changes |
 | `display_order` | Who is shown first everywhere: `["mum","dad"]` or `["dad","mum"]` |
 | `parents.*.username` | Login name, always lower-case |
 | `parents.*.display_name` | Shown in the script font at the top, in that parent's colour |
@@ -211,6 +211,7 @@ Raise it for bigger cells, lower it for a denser grid. Every calendar size is a 
 ```
 custody_calendar.html   the whole interface
 server.py               HTTP server, API, auth, holiday calculation
+tests/                  API tests (python3 -m unittest discover tests)
 config.json             your settings and accounts (gitignored)
 data.json               the database (gitignored)
 holidays.json           holiday cache (gitignored)
@@ -239,18 +240,57 @@ Writes are atomic (temp file + rename) and serialised behind a lock, so both par
 same time without corrupting the file. Each day keeps its last 10 changes, shown as "History" in the
 popup.
 
+### Editing at the same time
+
+Changes are merged **per slot**. If you tick your day while the other parent ticks their night on
+the same date, both are kept.
+- **The note is the exception.** If the other parent changed it while you were typing, your save is
+  refused rather than overwriting their text. Your text stays in the box; click into it and out
+  again to save it over theirs.
+- **Your view stays current.** Clicks show up immediately and are saved in order in the background,
+  and a note you are typing is never replaced by an incoming update.
+
 ### HTTP API
 
 | Method | Route | Purpose |
 |---|---|---|
 | GET | `/login`, POST `/do-login` | session cookie, 7 days, HttpOnly |
 | GET | `/api/state` | everything the page needs: days, settings, parents, holidays |
-| GET | `/api/rev` | tiny revision counter, polled for live updates |
-| POST | `/api/day` | change one date (`base_rev` guards against stale writes) |
-| POST | `/api/range` | apply one change set to a date range + weekday filter |
+| GET | `/api/changes?since=REV&wait=25` | the dates changed since revision `REV` (`null` = now empty); waits up to `wait` s (max 30) for something to change |
+| GET | `/api/days?from=&to=` | the stored dates in a range |
+| GET | `/api/rev` | current revision |
+| POST | `/api/day` | change one date: `{date, changes: {day\|night\|off\|lock: {mum\|dad: bool}, note}, note_base?}` |
+| POST | `/api/batch` | several `{op: "day", date, changes}` / `{op: "lock", date, locked}` ops, applied all-or-nothing |
+| POST | `/api/range` | apply one change set to a date range + weekday filter (locked days are skipped) |
 | POST | `/api/lock` | set or remove your own padlock |
-| POST | `/api/account` | change your own name, username or password |
+| POST | `/api/account` | change your own name, username or password (not with a token) |
 | GET | `/api/holidays?year=&refresh=1` | computed or refreshed holiday list |
+
+Every write answers with `rev`, the revision before it (`since`), and the resulting day(s).
+- **Staying in sync:** keep the last `rev` you saw and loop on `/api/changes?since=<rev>&wait=25`.
+  After a server restart the change log starts empty, so you get `{reset: true, days: ...}` with
+  everything instead.
+- **`note_base`:** the note your edit started from. If the stored note differs, the write gets a 409
+  with `conflict: "note"`.
+- **`base_rev`** (refuse if the day changed at all since that revision) still works for older clients.
+
+### API tokens
+
+```bash
+python3 server.py --add-token my-script --role dad   # prints the token once
+python3 server.py --list-tokens
+python3 server.py --remove-token my-script
+```
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" "http://localhost:8880/api/days?from=2026-10-01&to=2026-10-31"
+curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -d '{"date":"2026-10-14","changes":{"night":{"dad":true}}}' http://localhost:8880/api/day
+```
+
+A token acts as the parent it was created for, with exactly that parent's permissions: it can only
+set that parent's ⊘ and padlock, and it can't touch accounts. Its edits show up in the day's history
+as `my-script (token)`. Tokens are stored as SHA-256 hashes under `api_tokens` in `config.json`.
 
 ## Backups
 
