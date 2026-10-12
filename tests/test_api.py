@@ -24,6 +24,10 @@ TOKEN = "script-token-xyz"
 
 
 class ApiTest(unittest.TestCase):
+    def url(self, path):
+        # tests are written with short "/api/x" paths; the server only serves /api/v1/x
+        return self.base + ("/api/v1/" + path[len("/api/"):] if path.startswith("/api/") else path)
+
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         server.CONFIG_PATH = os.path.join(self.tmp, "config.json")
@@ -58,7 +62,7 @@ class ApiTest(unittest.TestCase):
         return opener
 
     def call(self, who, path, body=None, token=None):
-        req = urllib.request.Request(self.base + path, data=json.dumps(body).encode() if body is not None else None)
+        req = urllib.request.Request(self.url(path), data=json.dumps(body).encode() if body is not None else None)
         req.add_header("Content-Type", "application/json")
         if token:
             req.add_header("Authorization", "Bearer " + token)
@@ -225,6 +229,31 @@ class ApiTest(unittest.TestCase):
         self.assertFalse(os.path.exists(server.DATA_PATH + ".tmp"))
         server.load_data()
         self.assertEqual(server._data["days"]["2026-10-12"]["note"], "hi")
+
+
+    # ── versioning ───────────────────────────────────────────────────────────
+    def test_version_description(self):
+        for path in ("/api/v1", "/api/v1/"):
+            with self.mum.open(self.base + path) as r:
+                res = json.loads(r.read())
+            self.assertEqual((res["version"], res["base"]), ("v1", "/api/v1"))
+            self.assertTrue(any("/api/v1/changes" in e for e in res["endpoints"]))
+
+    def test_unsupported_version(self):
+        for method_body in (None, b"{}"):
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                self.mum.open(self.base + "/api/v2/state", data=method_body)
+            self.assertEqual(cm.exception.code, 404)
+            self.assertIn("v2", json.loads(cm.exception.read())["error"])
+
+    def test_unversioned_paths_not_served(self):
+        for path, body in (("/api/state", None), ("/api/rev", None), ("/api/", None),
+                           ("/api/day", b'{"date":"2026-10-01","changes":{"day":{"mum":true}}}')):
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                self.mum.open(self.base + path, data=body)
+            self.assertEqual(cm.exception.code, 404, path)
+            self.assertIn("/api/v1", json.loads(cm.exception.read())["error"])
+        self.assertNotIn("2026-10-01", self.stored().get("days", {}) if os.path.exists(server.DATA_PATH) else {})
 
 
 if __name__ == "__main__":

@@ -483,7 +483,10 @@ function flash(text, cls) {
 }
 
 /* ---------- server ---------- */
+const API_VERSION = "v1";
+// Calls use the stable, versioned API; paths are written as "/api/x" and sent as "/api/v1/x".
 async function api(path, body) {
+  path = path.replace(/^\/api\//, "/api/" + API_VERSION + "/");
   const opt = body
     ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
     : {};

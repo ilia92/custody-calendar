@@ -721,6 +721,43 @@ LOGIN_PAGE = """<!doctype html>
 </form></body></html>
 """
 
+# The API is versioned: /api/v1/... is the stable contract for scripts. Within v1, endpoints and
+# response fields may be added but never renamed or removed - a breaking change would go into
+# /api/v2 while v1 keeps working. Unversioned /api/... paths are not served.
+API_VERSION = "v1"
+API_ENDPOINTS = [
+    "GET  /api/v1                       this description",
+    "GET  /api/v1/state                 everything the page needs",
+    "GET  /api/v1/changes?since=REV&wait=S   dates changed since REV (long-poll)",
+    "GET  /api/v1/days?from=&to=        stored dates in a range",
+    "GET  /api/v1/rev                   current revision",
+    "POST /api/v1/day                   change one date",
+    "POST /api/v1/batch                 day/lock ops, all-or-nothing",
+    "POST /api/v1/range                 apply a change set to a date range",
+    "POST /api/v1/lock                  set or remove your own padlock",
+    "POST /api/v1/account               change your own account (not with a token)",
+    "GET  /api/v1/holidays?year=&refresh=1   holiday list",
+]
+API_VERSION_RE = re.compile(r"^/api/(v\d+)(/.*)?$")
+
+
+def internal_api_path(path):
+    """Map /api/v1/x onto the handlers' /api/x. Unversioned and unknown versions are refused."""
+    if not (path == "/api" or path.startswith("/api/")):
+        return path
+    m = API_VERSION_RE.match(path)
+    if not m:
+        raise ApiError(404, "The API is versioned - use /api/%s/..." % API_VERSION)
+    if m.group(1) != API_VERSION:
+        raise ApiError(404, "API version %s is not supported - use /api/%s" % (m.group(1), API_VERSION))
+    return "/api" + (m.group(2) or "/")
+
+
+def api_description():
+    return {"app": "custody-calendar", "version": API_VERSION, "supported": [API_VERSION],
+            "base": "/api/" + API_VERSION, "endpoints": API_ENDPOINTS}
+
+
 MIME = {
     ".html": "text/html; charset=utf-8",
     ".json": "application/json; charset=utf-8",
@@ -747,7 +784,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_request(self, code="-", size="-"):
         # every open tab long-polls /api/changes - don't flood the log with those
-        if str(code) == "200" and self.path.startswith(("/api/changes", "/api/rev")):
+        if str(code) == "200" and re.match(r"^/api/(v\d+/)?(changes|rev)", self.path):
             return
         super().log_request(code, size)
 
@@ -837,11 +874,14 @@ class Handler(BaseHTTPRequestHandler):
 
         sess = self._session()
         if not sess:
-            if path.startswith("/api/"):
+            if path.startswith("/api/") or path == "/api":
                 return self._json(401, {"error": "Not signed in", "login": "/login"})
             return self._redirect("/login")
 
         try:
+            path = internal_api_path(path)
+            if path == "/api/":
+                return self._json(200, api_description())
             if path == "/api/state":
                 maybe_reload_config()
                 this_year = date.today().year
@@ -951,6 +991,7 @@ class Handler(BaseHTTPRequestHandler):
         username = self._actor(sess)
 
         try:
+            path = internal_api_path(path)
             payload = self._json_body()
             if not isinstance(payload, dict):
                 raise ApiError(400, "Body must be a JSON object")
@@ -1113,7 +1154,7 @@ def cmd_add_token(args):
         save_config()
     print("API token %r created, acting as %s (%s). Store it now - it is not shown again:\n\n  %s\n"
           % (name, role, CONFIG["parents"][role]["display_name"], token))
-    print('Use it as:  curl -H "Authorization: Bearer <token>" http://localhost:%d/api/state' % PORT)
+    print('Use it as:  curl -H "Authorization: Bearer <token>" http://localhost:%d/api/v1/state' % PORT)
 
 
 def cmd_remove_token(name):

@@ -255,24 +255,31 @@ the same date, both are kept.
 | Method | Route | Purpose |
 |---|---|---|
 | GET | `/login`, POST `/do-login` | session cookie, 7 days, HttpOnly |
-| GET | `/api/state` | everything the page needs: days, settings, parents, holidays |
-| GET | `/api/changes?since=REV&wait=25` | the dates changed since revision `REV` (`null` = now empty); waits up to `wait` s (max 30) for something to change |
-| GET | `/api/days?from=&to=` | the stored dates in a range |
-| GET | `/api/rev` | current revision |
-| POST | `/api/day` | change one date: `{date, changes: {day\|night\|off\|lock: {mum\|dad: bool}, note}, note_base?}` |
-| POST | `/api/batch` | several `{op: "day", date, changes}` / `{op: "lock", date, locked}` ops, applied all-or-nothing |
-| POST | `/api/range` | apply one change set to a date range + weekday filter (locked days are skipped) |
-| POST | `/api/lock` | set or remove your own padlock |
-| POST | `/api/account` | change your own name, username or password (not with a token) |
-| GET | `/api/holidays?year=&refresh=1` | computed or refreshed holiday list |
+| GET | `/api/v1/state` | everything the page needs: days, settings, parents, holidays |
+| GET | `/api/v1/changes?since=REV&wait=25` | the dates changed since revision `REV` (`null` = now empty); waits up to `wait` s (max 30) for something to change |
+| GET | `/api/v1/days?from=&to=` | the stored dates in a range |
+| GET | `/api/v1/rev` | current revision |
+| POST | `/api/v1/day` | change one date: `{date, changes: {day\|night\|off\|lock: {mum\|dad: bool}, note}, note_base?}` |
+| POST | `/api/v1/batch` | several `{op: "day", date, changes}` / `{op: "lock", date, locked}` ops, applied all-or-nothing |
+| POST | `/api/v1/range` | apply one change set to a date range + weekday filter (locked days are skipped) |
+| POST | `/api/v1/lock` | set or remove your own padlock |
+| POST | `/api/v1/account` | change your own name, username or password (not with a token) |
+| GET | `/api/v1/holidays?year=&refresh=1` | computed or refreshed holiday list |
 
 Every write answers with `rev`, the revision before it (`since`), and the resulting day(s).
-- **Staying in sync:** keep the last `rev` you saw and loop on `/api/changes?since=<rev>&wait=25`.
+- **Staying in sync:** keep the last `rev` you saw and loop on `/api/v1/changes?since=<rev>&wait=25`.
   After a server restart the change log starts empty, so you get `{reset: true, days: ...}` with
   everything instead.
 - **`note_base`:** the note your edit started from. If the stored note differs, the write gets a 409
   with `conflict: "note"`.
-- **`base_rev`** (refuse if the day changed at all since that revision) still works for older clients.
+- **`base_rev`** (optional): refuse the write if the day changed at all since that revision.
+
+### Versioning
+
+`/api/v1` is the stable contract for scripts.
+- **Within v1,** endpoints and response fields may be **added** but are never renamed or removed. A breaking change would go into `/api/v2`, and v1 would keep working.
+- **`GET /api/v1`** describes the version and lists the endpoints.
+- **Unversioned paths (`/api/...`) are not served.** They answer 404 with a pointer to `/api/v1`.
 
 ### API tokens
 
@@ -283,9 +290,9 @@ python3 server.py --remove-token my-script
 ```
 
 ```bash
-curl -H "Authorization: Bearer $TOKEN" "http://localhost:8880/api/days?from=2026-10-01&to=2026-10-31"
+curl -H "Authorization: Bearer $TOKEN" "http://localhost:8880/api/v1/days?from=2026-10-01&to=2026-10-31"
 curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-     -d '{"date":"2026-10-14","changes":{"night":{"dad":true}}}' http://localhost:8880/api/day
+     -d '{"date":"2026-10-14","changes":{"night":{"dad":true}}}' http://localhost:8880/api/v1/day
 ```
 
 A token acts as the parent it was created for, with exactly that parent's permissions: it can only
