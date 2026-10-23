@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=1000">
 <title>Custody Calendar</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.ico" sizes="16x16 32x32 48x48">
@@ -103,6 +103,8 @@ button { font-family: inherit; }
   font-size: calc(10.5px * var(--cs)); color: #4b5563; border-top: 1px dashed var(--line);
   padding: 2px 0; position: relative; z-index: 1; }
 .slot .who { font-weight: 700; letter-spacing: .2px; }
+/* the moon emoji only comes in yellow: tint it grey-blue */
+.moon { display: inline-block; filter: hue-rotate(190deg) saturate(.5) brightness(.6); }
 .slot.none { background: repeating-linear-gradient(45deg, #fff 0 6px, #f6f7f9 6px 12px);
   color: #b0b5bd; }
 .slot.mum { background: var(--mum-soft); color: #831843; }
@@ -287,7 +289,7 @@ details.range summary { cursor: pointer; font-size: 13px; font-weight: 600; }
         <button class="cal-nav-btn" id="cal-next" title="Next month">&rsaquo;</button>
         <button class="ghost" id="cal-today">Today</button>
         <span class="spacer"></span>
-        <span style="font-size:11px;color:var(--muted)">click a &#9728;/&#127769; strip to cycle owner &middot; click the date for details</span>
+        <span style="font-size:11px;color:var(--muted)">click a &#9728;&#65039;/<span class="moon">&#127769;</span> strip to cycle owner &middot; click the date for details</span>
       </div>
       <div class="cal-grid" id="cal-grid"></div>
       <div class="legend">
@@ -296,7 +298,7 @@ details.range summary { cursor: pointer; font-size: 13px; font-weight: 600; }
         <span><i class="sw none"></i> not decided</span>
         <span><i class="sw offm"></i> mum can't</span>
         <span><i class="sw offd"></i> dad can't</span>
-        <span>&#9728; day &middot; &#127769; night (evening &rarr; next morning)</span>
+        <span>&#9728;&#65039; day &middot; <span class="moon">&#127769;</span> night (evening &rarr; next morning)</span>
         <span id="lg-lock"></span>
         <span>&#9888; both unavailable</span>
         <span><i class="sw hol"></i> &#127881; holiday / day off</span>
@@ -327,14 +329,14 @@ details.range summary { cursor: pointer; font-size: 13px; font-weight: 600; }
     <div class="locked-note hide" id="m-locked"></div>
 
     <div class="slot-edit">
-      <div class="t">&#9728; DAY &mdash; who has the kids during the day</div>
+      <div class="t">&#9728;&#65039; DAY &mdash; who has the kids during the day</div>
       <div class="picks">
         <label class="pick mum" data-g="day" data-r="mum"><input type="checkbox"><span></span></label>
         <label class="pick dad" data-g="day" data-r="dad"><input type="checkbox"><span></span></label>
       </div>
     </div>
     <div class="slot-edit">
-      <div class="t">&#127769; NIGHT &mdash; this evening until next morning</div>
+      <div class="t"><span class="moon">&#127769;</span> NIGHT &mdash; this evening until next morning</div>
       <div class="picks">
         <label class="pick mum" data-g="night" data-r="mum"><input type="checkbox"><span></span></label>
         <label class="pick dad" data-g="night" data-r="dad"><input type="checkbox"><span></span></label>
@@ -363,7 +365,7 @@ details.range summary { cursor: pointer; font-size: 13px; font-weight: 600; }
       <div class="range-body">
         <div class="row"><input type="date" id="r-from"><span style="color:var(--muted)">&rarr;</span><input type="date" id="r-to"></div>
         <div class="dows" id="r-dows"></div>
-        <div style="font-size:11px;color:var(--muted)">Copies the &#9728;/&#127769; ticks and your &#8856; flag above onto every selected date. Locked days are skipped.</div>
+        <div style="font-size:11px;color:var(--muted)">Copies the &#9728;&#65039;/<span class="moon">&#127769;</span> ticks and your &#8856; flag above onto every selected date. Locked days are skipped.</div>
         <button class="btn" id="r-apply">Apply to range</button>
       </div>
     </details>
@@ -432,6 +434,8 @@ details.range summary { cursor: pointer; font-size: 13px; font-weight: 600; }
 <script>
 "use strict";
 const DOW = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const SUN = "☀️";
+const MOON = '<span class="moon">🌙</span>';
 const MONTHS = ["January","February","March","April","May","June",
                 "July","August","September","October","November","December"];
 const ROLES = ["mum","dad"];      // the data model - never changes
@@ -707,7 +711,7 @@ function renderCalendar() {
     hd.title = "Open details";
     cell.appendChild(hd);
 
-    [["day", "☀"], ["night", "🌙"]].forEach(([group, icon]) => {
+    [["day", SUN], ["night", MOON]].forEach(([group, icon]) => {
       const s = document.createElement("div");
       const k = slotClass(rec, group);
       s.className = "slot " + k;
@@ -809,8 +813,8 @@ function renderStats() {
   html += '<div class="stat-head"><span>' + st.range[0] + " → " + st.range[1]
         + "</span>" + ORDER.map((r) => '<span class="' + r + '-h">' + nameOf(r) + "</span>").join("")
         + "</div>";
-  html += row("☀ Days", st.day);
-  html += row("🌙 Nights", st.night);
+  html += row(SUN + " Days", st.day);
+  html += row(MOON + " Nights", st.night);
   html += row("Total slots", tot, "total");
   html += row("⊘ Cannot take", st.off);
   html += row("Weekend days", st.we, "", "sat/sun");
@@ -824,8 +828,8 @@ function renderStats() {
             + nameOf(r) + "</span>").join("")
         + "</div>";
   html += '<div class="stat-row" style="border-top:1px solid var(--line);margin-top:10px">'
-        + '<span class="lbl">Shared &#9728;/&#127769;</span><b>' + st.shared.day + "</b><b>" + st.shared.night + "</b></div>";
-  html += '<div class="stat-row"><span class="lbl">Not decided &#9728;/&#127769;</span><b>'
+        + '<span class="lbl">Shared ' + SUN + "/" + MOON + '</span><b>' + st.shared.day + "</b><b>" + st.shared.night + "</b></div>";
+  html += '<div class="stat-row"><span class="lbl">Not decided &#9728;&#65039;/<span class="moon">&#127769;</span></span><b>'
         + st.open.day + "</b><b>" + st.open.night + "</b></div>";
   html += '<div class="stat-row"><span class="lbl">&#9888; Both unavailable</span><b>'
         + st.conflicts + "</b><b></b></div>";
@@ -835,7 +839,7 @@ function renderStats() {
         + '<span class="lbl">Dates counted</span><b>' + st.dates + "</b><b></b></div>";
   if (st.notes.length) {
     html += '<div class="notes-list"><b style="font-size:12px">Notes</b>'
-      + st.notes.map(([k, n]) => '<div class="ni"><em>' + k.slice(5) + "</em><span>"
+      + st.notes.map(([k, n]) => '<div class="ni"><em>' + +k.slice(8) + ". " + MONTHS[+k.slice(5, 7) - 1].slice(0, 3) + "</em><span>"
         + n.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c])) + "</span></div>").join("")
       + "</div>";
   }
